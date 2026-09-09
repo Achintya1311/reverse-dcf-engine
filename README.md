@@ -36,7 +36,12 @@ Runs offline against committed fixtures by default. Live data needs a key in `.e
 
 ## Findings
 
-Nothing yet. This section fills in as the work lands, including the results that do not flatter the method.
+Nothing on the valuation itself yet. Day 1 shortlisted three NSE mid-caps that fit the
+₹5,000–50,000 cr / thin-coverage / one-line-business screen and picked **Kirloskar Ferrous
+Industries** to take through the reverse DCF — reasoning and the two fallback picks are in
+[`research/shortlist.md`](research/shortlist.md). That pick was made by the automated run
+itself (no live user was available to approve it that day) and is explicitly open to
+override before Day 2 locks in the financials.
 
 ## Checkpoint log
 
