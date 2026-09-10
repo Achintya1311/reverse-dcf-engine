@@ -63,13 +63,22 @@ FY2014-15 onward. Full reasoning, the sector-diversity check, and the fallback o
 - The solver assumes a single-stage-plus-terminal structure. A business mid-transition may not be well described by it.
 - **Day 2 is blocked, not done.** This sandbox's network egress rejects every direct
   connection to an external host (Gulf Oil's own annual-report archive, screener.in,
-  moneycontrol, NSE/BSE, Damodaran Online, FRED — all tested and all rejected on
-  2026-09-10). Only web search summaries are reachable, and they cannot supply a page
-  number inside a PDF that can't be opened. No financials have been hand-entered yet;
-  inventing page-cited numbers to fill the gap would fabricate the model's input, so
-  the honest state is recorded instead. See [`research/sources.md`](research/sources.md)
-  for exactly what was tried and the resume plan for when a run has real access to the
-  filing archive.
+  moneycontrol, NSE/BSE, Damodaran Online, FRED, and even unrelated sites like Google
+  and Wikipedia — all tested and all rejected, on both 2026-09-09 and again on
+  2026-09-10). That second test is what confirms this isn't a flaky site or a
+  finance-specific block: it's a sandbox-wide egress allowlist with nothing on it for
+  fetching documents, so re-trying the same hosts on a future day won't help by itself.
+  Only web search summaries are reachable, and they cannot supply a page number inside
+  a PDF that can't be opened. No financials have been hand-entered yet; inventing
+  page-cited numbers to fill the gap would fabricate the model's input, so the honest
+  state is recorded instead. What *is* committed is the Day 2 schema:
+  `data/GULFOILLUB/financials.csv` has the right ten fiscal-year rows and line-item
+  columns (validated by `reverse_dcf/financials.py` and
+  `tests/test_financials_schema.py`), every cell a `PENDING` placeholder rather than an
+  invented number. See [`research/sources.md`](research/sources.md) for exactly what
+  was tried and the two concrete ways to resume: an egress allowlist change, or a human
+  dropping the source annual-report PDFs into `sources/raw/GULFOILLUB/` for offline
+  transcription.
 
 ## Where this sits
 

@@ -59,3 +59,50 @@ archive), Day 2 resumes exactly as scoped:
 If Gulf Oil's own archive stays unreachable but a mirror of the same filings
 becomes reachable (NSE/BSE corporate-filings pages, for instance), that's an
 acceptable substitute source — cite it the same way, filing and page.
+
+## 2026-09-10 (second run) — same block, sharper diagnosis
+
+Re-tested before redoing Day 2 in case the block was transient. It is not:
+identical `403` rejections on the exact same five hosts as the first run,
+plus a categorical check this time against unrelated, non-finance hosts —
+`www.google.com`, `en.wikipedia.org` and `web.archive.org` were rejected the
+same way. Only a short allowlist of package-registry-style hosts (`pypi.org`,
+`files.pythonhosted.org`, `api.github.com`, `raw.githubusercontent.com`, etc.)
+is reachable. That rules out "this specific site is down" or "finance sites
+are singled out" — it's a sandbox-wide egress allowlist that has nothing on
+it for fetching documents. Retrying the same hosts again tomorrow without a
+policy change will produce the same result, so the correct move today is not
+to keep re-testing but to make the parts of Day 2 that don't need a live
+fetch as ready as possible, and record the resume path precisely.
+
+**What resuming actually needs — either one:**
+
+1. The sandbox's network egress allowlist grows an entry for
+   `india.gulfoilltd.com` (or another primary-source filing archive). Then
+   Day 2 resumes exactly as scoped above.
+2. A human places the source PDFs (or extracted text/page images) for the
+   FY2014-15 through FY2023-24 Gulf Oil Lubricants India annual reports under
+   `sources/raw/GULFOILLUB/` in this repo. A future run can then transcribe
+   figures from those local files with page citations — no live fetch needed
+   for that path at all.
+
+**What did move today:** the Day 2 *schema* is now committed and tested even
+though the Day 2 *data* still is not. `data/GULFOILLUB/financials.csv` has
+the ten fiscal-year rows and the line-item columns the reverse DCF needs
+(`reverse_dcf/financials.py` defines and validates them), every cell holding
+the literal string `PENDING` rather than a number — there is no honest way to
+fill those cells without the source documents, so they stay placeholders.
+`tests/test_financials_schema.py` locks the column set and fiscal-year
+coverage now and will start failing, cell by cell, as real figures replace
+`PENDING` — a mechanical prompt for a future run to update it as sourcing
+actually completes. The citation ledger below is empty for the same reason:
+there is nothing to cite yet.
+
+## Citation ledger (empty until sourcing unblocks)
+
+One row per figure once transcription starts. `fiscal_year` and `line_item`
+must match `data/GULFOILLUB/financials.csv` exactly.
+
+| fiscal_year | line_item | value | document | page |
+|---|---|---|---|---|
+| _(none yet)_ | | | | |
