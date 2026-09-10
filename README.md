@@ -37,11 +37,14 @@ Runs offline against committed fixtures by default. Live data needs a key in `.e
 ## Findings
 
 Nothing on the valuation itself yet. Day 1 shortlisted three NSE mid-caps that fit the
-₹5,000–50,000 cr / thin-coverage / one-line-business screen and picked **Kirloskar Ferrous
-Industries** to take through the reverse DCF — reasoning and the two fallback picks are in
-[`research/shortlist.md`](research/shortlist.md). That pick was made by the automated run
-itself (no live user was available to approve it that day) and is explicitly open to
-override before Day 2 locks in the financials.
+₹5,000–50,000 cr / thin-coverage / one-line-business screen and picked Kirloskar Ferrous
+Industries to take through the reverse DCF, made by the automated run itself since no live
+user was available that day. Achintya reviewed it and asked for a different sector plus
+stronger confidence on sourcing ten years of page-cited financials, so the pick changed to
+**Gulf Oil Lubricants India** (NSE: GULFOILLUB) — automotive/industrial lubricants, thin
+coverage, and a dedicated annual-report archive on its own investor relations site covering
+FY2014-15 onward. Full reasoning, the sector-diversity check, and the fallback order are in
+[`research/shortlist.md`](research/shortlist.md).
 
 ## Checkpoint log
 

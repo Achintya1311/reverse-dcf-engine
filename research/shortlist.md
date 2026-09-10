@@ -88,3 +88,43 @@ Reasons, in order:
 harder to source (page-cited figures for all ten years) than expected once Day 2 starts,
 fall back to Balaji Amines first, then Time Technoplast, then Elgi Equipments from the
 reserve list above — in that order, for the same reasons ranked here.
+
+## Override — 2026-09-10, Achintya
+
+Achintya reviewed the pick above and asked for two changes: a different sector than metals
+(the shortlist's three finalists were metals/foundry, chemicals, and plastics — narrower
+than it looked), and stronger confidence on sourcing ten years of page-cited financials
+before committing to hand-entering them.
+
+Additional candidates checked against the same screen to answer that:
+
+| Company | Sector | Market cap | Coverage | Why not picked |
+|---|---|---|---|---|
+| VRL Logistics | Road logistics | ~₹5,200 cr | 7 analysts | Coverage isn't thin. |
+| Suprajit Engineering | Auto components (cables) | ~₹6,500 cr | 7–8 analysts, "Good" | Coverage isn't thin. |
+| Somany Ceramics | Tiles | ~₹2,300–2,350 cr | 16 analysts | Under the cap floor and well covered. |
+| Mayur Uniquoters | Synthetic leather | ~₹3,200–3,400 cr | Low | Right shape (simple, thin coverage) but under the ₹5,000 cr floor. |
+| Kirloskar Brothers | Pumps, valves, hydro turbines | ~₹15,300 cr | 1 analyst (Trendlyne) | Genuinely thinner coverage than the pick below, but it's the same corporate family as the dropped Kirloskar Ferrous pick — not the clean sector break Achintya asked for, and three product lines (pumps/valves/turbines) is more to untangle than one. Kept as the fallback if Gulf Oil's sourcing turns out weaker than expected. |
+
+**New pick: Gulf Oil Lubricants India (NSE: GULFOILLUB)**
+
+- **Business:** automotive and industrial lubricants (Hinduja Group) — blends base oils and
+  additives into branded engine oil, gear oil, grease and coolant, sold through a
+  dealer/distributor network to auto and industrial customers under the Gulf brand. One
+  product family, no segments to reconcile — as simple as Kirloskar Ferrous was, in a
+  completely different sector (branded consumer/B2B lubricants vs. foundry).
+- **Market cap:** ~₹5,600–5,800 cr ([ICICI Direct](https://www.icicidirect.com/stocks/gulf-oil-lubricants-india-ltd-share-price)) — inside the ₹5k–50k cr band, closer to the floor
+  than Kirloskar Ferrous was, worth re-checking before Day 2 locks WACC inputs.
+- **Coverage:** thin — 6 recent reports from 3 sources on Trendlyne, comparable to Balaji
+  Amines' 1–3.
+- **Sourcing — the specific concern raised:** Gulf Oil runs its own dedicated annual-report
+  archive at `india.gulfoilltd.com/investors/annual-reports`, confirmed to hold reports from
+  FY2014-15 through FY2023-24 in one place with page-citable PDFs, rather than scattered
+  across BSE/NSE filing pages. This is the best-documented archive found in this search and
+  directly answers the sourcing question — it comfortably covers ten years by the time Day 2
+  starts.
+
+**Fallback order if Gulf Oil's sourcing or history turns out weaker than expected:**
+Kirloskar Brothers (thinnest coverage of anything checked, different sector, but same
+corporate family as the dropped pick), then Balaji Amines, then Time Technoplast — same
+reasoning as the original ranking for the latter two.
