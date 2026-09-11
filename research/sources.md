@@ -98,6 +98,40 @@ coverage now and will start failing, cell by cell, as real figures replace
 actually completes. The citation ledger below is empty for the same reason:
 there is nothing to cite yet.
 
+## 2026-09-11 (third run) — same block, one open decision resolved
+
+Checked `sources/raw/GULFOILLUB/` for human-dropped annual-report PDFs (the
+resume path 2 above) — the directory doesn't exist, nothing was dropped.
+Re-tested network egress: the proxy's own status endpoint
+(`$HTTPS_PROXY/__agentproxy/status`) logs today's attempt to
+`india.gulfoilltd.com:443` and `www.screener.in:443` as `connect_rejected`,
+`"gateway answered 403 to CONNECT (policy denial or upstream failure)"` — the
+proxy's own operator docs (`/root/.ccr/README.md`) say a 403 from the gateway
+is an organization egress policy denial and explicitly say not to keep
+retrying it, which matches the categorical, non-flaky pattern established on
+2026-09-09 and 2026-09-10. Recorded here rather than re-run again tomorrow:
+future days should check `sources/raw/GULFOILLUB/` for dropped source files
+first and, finding nothing, go straight to recording blocked instead of
+re-diagnosing the identical proxy policy a fourth time.
+
+Used the time instead to close the one open modeling decision Day 2's schema
+was still silent on: **standalone vs. consolidated financials.** Resolved
+as: prefer Gulf Oil Lubricants India's **consolidated** financial statements
+for all ten fiscal years, if the annual reports publish them. The reverse
+DCF is being run against the *listed* entity's market capitalization, which
+prices the economic interest attributable to its shareholders across
+whatever it consolidates (including any subsidiaries/JVs), not just the
+parent entity's own standalone books — using standalone financials when a
+consolidated statement exists would misstate free cash flow by the
+subsidiaries' contribution. Fall back to standalone, noted explicitly per
+affected fiscal year in the citation ledger, only for years where the
+annual report does not present a consolidated statement (common for older
+filings before consolidation became mandatory, or for a company with no
+reportable subsidiaries in that year). This is a policy for the transcriber
+to apply once sourcing unblocks, not a claim about Gulf Oil's actual
+corporate structure — that gets settled per filing, cited like any other
+figure, when the documents can finally be read.
+
 ## Citation ledger (empty until sourcing unblocks)
 
 One row per figure once transcription starts. `fiscal_year` and `line_item`
