@@ -31,9 +31,10 @@ uv venv && source .venv/bin/activate
 uv pip install -r requirements.txt
 python -m reverse_dcf.solve --ticker EXAMPLE.NS --price 1234.50
 python -m reverse_dcf.wacc                         # Day 3: WACC assumptions block for Gulf Oil
+python -m reverse_dcf.forward --growth 0.10 --years 10   # Day 4: forward FCFF DCF at an assumed growth rate
 ```
 
-Runs offline against committed fixtures by default. Live data needs a key in `.env` (see `.env.example`); the fixture path is the default so nothing blocks on network access. `reverse_dcf.wacc` reads its Damodaran/FRED inputs from `fixtures/wacc/*.csv`, committed CSVs - refreshing them from live sources needs `scripts/fetch_wacc_inputs.py`, which is not on the module's runtime path.
+Runs offline against committed fixtures by default. Live data needs a key in `.env` (see `.env.example`); the fixture path is the default so nothing blocks on network access. `reverse_dcf.wacc` reads its Damodaran/FRED inputs from `fixtures/wacc/*.csv`, committed CSVs - refreshing them from live sources needs `scripts/fetch_wacc_inputs.py`, which is not on the module's runtime path. `reverse_dcf.forward` takes `--growth` explicitly (it has no honest default - that is the number Day 5's solver exists to find) and derives every other assumption (EBIT margin, reinvestment rate, tax rate, WACC, terminal growth) from the latest fiscal year in `data/GULFOILLUB/financials.csv` and Day 3's WACC module; `--margin` and `--reinvestment-rate` override the derived defaults for sensitivity checks.
 
 ## Findings
 
@@ -53,6 +54,28 @@ cited cell-by-cell in `research/sources.md`). Revenue from operations grew from
 window - whether that pace is what today's price already assumes going forward
 is exactly what the reverse solver (Day 5) exists to answer, not something to
 eyeball here.
+
+Day 4 built the forward FCFF DCF engine (`reverse_dcf/forward.py`) that Day 5's
+reverse solver will call inside a root-finder. Revenue grows at a single constant
+rate for the explicit forecast, FCFF = EBIT x (1 - tax) x (1 - reinvestment rate),
+and a Gordon-growth terminal value picks up everything after. Every number is an
+argument or derived from the committed data - the module hardcodes nothing about
+Gulf Oil. At the current FY2023-24 base year (13.37% EBIT margin, -15.68%
+reinvestment rate - Gulf Oil released working capital and spent less on capex
+than it depreciated that year, not a typo, see limitations - 11.61% WACC from
+Day 3, 6.89% terminal growth defaulted to the same risk-free rate WACC uses),
+a **10% explicit-period revenue growth assumption implies ₹2,294/share**, versus
+Day 1's noted ~₹1,140-1,180 actual price at the time of the shortlist - roughly
+double. A **5% growth assumption implies ₹1,581/share**, still above the noted
+actual price. Neither number is the answer; Day 5's reverse solver exists to find
+the growth rate that reproduces today's actual price exactly, not to eyeball it
+from a couple of trial runs. Caught and fixed one real bug building this: the
+financials CSV is denominated in ₹ lakh while `shares_outstanding` is a raw share
+count, so the first version of `implied_share_price` came out three orders of
+magnitude too small (₹0.02/share) - `LAKH_TO_RUPEES` now converts at the one
+place real data enters the engine, and a regression test bounds the implied price
+to a plausible order of magnitude so this can't silently reappear. 17 new tests,
+42/42 pass.
 
 Day 3 built the WACC module (`reverse_dcf/wacc.py`). Gulf Oil Lubricants India is
 Damodaran's own `Chemical (Basic)` industry classification (`indname.xls`, not a
@@ -136,6 +159,35 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   (2026-09-11) - a two-to-three-month reporting lag typical of this series, not
   a stale-data mistake, but a real gap between "the rate used" and "the rate
   today" worth keeping in mind if Indian yields have moved meaningfully since.
+- **The forward DCF is single-stage-plus-terminal, and margin/reinvestment
+  are frozen at one fiscal year's actuals.** `reverse_dcf/forward.py` grows
+  revenue at one constant rate for the whole explicit forecast, then a
+  Gordon-growth terminal value at a separate (slower) rate. A business with a
+  margin ramp, a capex cycle, or a reinvestment step change isn't well
+  described by that shape - this is the README's pre-existing solver
+  limitation, now also true of the forward engine underneath it.
+- **FY2023-24's reinvestment rate is negative (-15.68%)**, because working
+  capital fell and capex was below depreciation that year - real numbers from
+  `data/GULFOILLUB/financials.csv`, not a bug. `base_case_from_financials`
+  defaults to it anyway since it is the most recent actual; a negative
+  reinvestment rate held constant for a 10-year forecast is not obviously a
+  sustainable steady state, and is exactly the kind of assumption the
+  `--reinvestment-rate` override exists to stress-test. Worth revisiting once
+  Day 6 sets the implied figures against Gulf Oil's own multi-year history
+  instead of a single year.
+- **The module lives at `reverse_dcf/forward.py`, not the `dcf/forward.py`
+  path named in `NEXT_STEPS.md`.** Every other day's module lives under
+  `reverse_dcf/` (`wacc.py`, `financials.py`); a separate top-level `dcf/`
+  package for one file would fragment the layout for no benefit. The Day 4
+  output artifact is unchanged, only its path.
+- **The implied share price at any single growth assumption is not yet
+  validated against a round-trip.** Day 4 only checks that the forward engine
+  is internally consistent (it collapses to the textbook Gordon growth value
+  when explicit and terminal growth match, see `tests/test_forward.py`) and
+  that a plausible base case produces a plausible price. Whether the engine
+  can reproduce today's actual price for *some* growth rate - the real
+  correctness gate this repo is built around - is Day 5's reverse solver to
+  prove.
 
 ## Where this sits
 
