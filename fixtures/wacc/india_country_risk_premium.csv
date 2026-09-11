@@ -1,0 +1,2 @@
+country,moodys_rating,adj_default_spread_pct,country_risk_premium_pct,equity_risk_premium_pct,corporate_tax_rate_pct,sovereign_cds_pct,erp_based_on_cds_pct,source_url,fetched_date
+India,Baa3,1.87,2.85,7.08,30.0,0.66,5.23,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ctryprem.html,2026-09-11

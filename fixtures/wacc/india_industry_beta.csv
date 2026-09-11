@@ -1,0 +1,2 @@
+industry_name,num_firms,beta,de_ratio,effective_tax_rate_pct,unlevered_beta,unlevered_beta_cash_corrected,source_url,source_sheet,data_updated,fetched_date
+Chemical (Basic),152,0.7702928535722655,0.10986726753610676,19.990524157865202,0.715282555639237,0.7302104514943204,https://pages.stern.nyu.edu/~adamodar/pc/datasets/betaIndia.xls,Industry Averages,2026-01-05,2026-09-11

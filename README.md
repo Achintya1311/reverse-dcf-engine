@@ -30,9 +30,10 @@ Every source is free. Nothing in this project requires a paid tier, a subscripti
 uv venv && source .venv/bin/activate
 uv pip install -r requirements.txt
 python -m reverse_dcf.solve --ticker EXAMPLE.NS --price 1234.50
+python -m reverse_dcf.wacc                         # Day 3: WACC assumptions block for Gulf Oil
 ```
 
-Runs offline against committed fixtures by default. Live data needs a key in `.env` (see `.env.example`); the fixture path is the default so nothing blocks on network access.
+Runs offline against committed fixtures by default. Live data needs a key in `.env` (see `.env.example`); the fixture path is the default so nothing blocks on network access. `reverse_dcf.wacc` reads its Damodaran/FRED inputs from `fixtures/wacc/*.csv`, committed CSVs - refreshing them from live sources needs `scripts/fetch_wacc_inputs.py`, which is not on the module's runtime path.
 
 ## Findings
 
@@ -52,6 +53,17 @@ cited cell-by-cell in `research/sources.md`). Revenue from operations grew from
 window - whether that pace is what today's price already assumes going forward
 is exactly what the reverse solver (Day 5) exists to answer, not something to
 eyeball here.
+
+Day 3 built the WACC module (`reverse_dcf/wacc.py`). Gulf Oil Lubricants India is
+Damodaran's own `Chemical (Basic)` industry classification (`indname.xls`, not a
+guess from the lubricants business description); its India-industry unlevered beta
+(0.7153) relevers to 0.8041 against Gulf Oil's own FY2023-24 leverage and tax rate,
+giving a CAPM cost of equity of 12.58% off a 6.89% India 10-year G-Sec risk-free
+rate and Damodaran's 7.08% India equity risk premium. Cost of debt from the filings
+(average FY2022-23/FY2023-24 total debt) is 7.75% pre-tax, 5.78% after Gulf Oil's
+own 25.48% effective tax rate. Blended at book weights of 14.29% debt / 85.71%
+equity, **WACC = 11.61%**. Full sourcing and methodology in
+[`research/wacc_sources.md`](research/wacc_sources.md).
 
 ## Checkpoint log
 
@@ -102,6 +114,27 @@ eyeball here.
   transcription risk despite the citation ledger - every figure in
   `data/GULFOILLUB/financials.csv` traces to a specific PDF and page in
   `research/sources.md`, so a reviewer can check any cell against the source.
+- **The WACC's capital structure is book value, not market value.** The Day 2
+  schema has no book-equity or total-liabilities column, so `capital_structure()`
+  approximates equity as `total_assets - total_debt`, folding every non-debt
+  liability (trade payables, provisions, deferred tax) into "equity". That
+  overstates book equity and therefore understates the debt weight - a real bias,
+  not a rounding error. Day 1's shortlist noted an approximate market cap of
+  ₹5,600–5,800 cr for Gulf Oil; once Day 5 needs a precise current price for the
+  reverse solve anyway, it would be worth rerunning WACC at market weights and
+  checking how much the 11.61% figure moves.
+- **The relevered beta is a Hamada-formula estimate, not a directly measured
+  company beta.** It unlevers Damodaran's `Chemical (Basic)` India industry
+  average and relevers it to Gulf Oil's own FY2023-24 debt and tax rate. Hamada
+  assumes debt itself carries zero systematic risk, which understates the true
+  levered beta for a company whose cost of debt (7.75% pre-tax, see
+  `research/wacc_sources.md`) is well above the risk-free rate - Gulf Oil's debt
+  isn't actually riskless.
+- **The 6.89% risk-free rate lags today.** FRED's India 10-year G-Sec series
+  (`INDIRLTLT01STM`) was last updated for 2026-06-01 as of this fetch
+  (2026-09-11) - a two-to-three-month reporting lag typical of this series, not
+  a stale-data mistake, but a real gap between "the rate used" and "the rate
+  today" worth keeping in mind if Indian yields have moved meaningfully since.
 
 ## Where this sits
 
