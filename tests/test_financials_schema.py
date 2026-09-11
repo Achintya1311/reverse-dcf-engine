@@ -3,10 +3,11 @@ from pathlib import Path
 import pytest
 
 from reverse_dcf.financials import (
-    LINE_ITEM_COLUMNS,
     REQUIRED_COLUMNS,
+    check_ebit_identity,
     find_pending,
     load_financials,
+    to_numeric,
 )
 
 DATA = Path(__file__).resolve().parent.parent / "data" / "GULFOILLUB" / "financials.csv"
@@ -31,10 +32,30 @@ def test_missing_column_raises(tmp_path):
         load_financials(bad)
 
 
-def test_committed_financials_are_still_all_pending():
-    # Day 2 is blocked on sourcing (see research/sources.md) - no real figures
-    # have been entered yet, only the schema. This test documents that honest
-    # state and should start failing, cell by cell, as real data lands.
+def test_no_pending_cells_remain():
+    # Day 2's ten years of Gulf Oil Lubricants India financials are now
+    # transcribed from the annual reports (see research/sources.md's
+    # citation ledger) - no PENDING placeholders should be left.
     df = load_financials(DATA)
-    pending = find_pending(df)
-    assert len(pending) == len(EXPECTED_FISCAL_YEARS) * len(LINE_ITEM_COLUMNS)
+    assert find_pending(df) == []
+
+
+def test_all_line_items_are_numeric():
+    # Guards against a stray non-numeric transcription slip (a stray currency
+    # symbol, a footnote marker) that find_pending wouldn't catch.
+    to_numeric(load_financials(DATA))  # raises ValueError on any bad cell
+
+
+def test_ebit_equals_ebitda_minus_depreciation():
+    # ebit and ebitda are both derived from (profit before tax + finance
+    # costs) by a different path - see the financials.py module docstring -
+    # so they must agree exactly (within rounding) or one was mistranscribed.
+    df = load_financials(DATA)
+    assert check_ebit_identity(df) == []
+
+
+def test_shares_outstanding_are_positive_integers():
+    df = to_numeric(load_financials(DATA))
+    shares = df["shares_outstanding"]
+    assert (shares > 0).all()
+    assert (shares == shares.astype(int)).all()

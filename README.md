@@ -46,6 +46,13 @@ coverage, and a dedicated annual-report archive on its own investor relations si
 FY2014-15 onward. Full reasoning, the sector-diversity check, and the fallback order are in
 [`research/shortlist.md`](research/shortlist.md).
 
+Day 2 transcribed all ten years of standalone financials (`data/GULFOILLUB/financials.csv`,
+cited cell-by-cell in `research/sources.md`). Revenue from operations grew from
+₹967.5 cr (FY2014-15) to ₹3,284.1 cr (FY2023-24), roughly a 14.5% CAGR over the
+window - whether that pace is what today's price already assumes going forward
+is exactly what the reverse solver (Day 5) exists to answer, not something to
+eyeball here.
+
 ## Checkpoint log
 
 <!-- CHECKPOINTS:START -->
@@ -63,26 +70,37 @@ FY2014-15 onward. Full reasoning, the sector-diversity check, and the fallback o
 - Ten years of hand-entered financials is a small sample and a transcription risk. Every figure is cited so it can be checked.
 - Implied assumptions are only as good as the WACC. The cost of equity uses a published India ERP rather than a bottom-up estimate.
 - The solver assumes a single-stage-plus-terminal structure. A business mid-transition may not be well described by it.
-- **Day 2 is blocked, not done.** This sandbox's network egress rejects every direct
-  connection to an external host (Gulf Oil's own annual-report archive, screener.in,
-  moneycontrol, NSE/BSE, Damodaran Online, FRED, and even unrelated sites like Google
-  and Wikipedia). Confirmed a third time on 2026-09-11 via the egress proxy's own
-  status log, which records the block as a `403` organization policy denial rather
-  than a site-specific or flaky failure — its own operator docs say not to keep
-  retrying a policy denial, so future days should check `sources/raw/GULFOILLUB/`
-  for human-dropped source PDFs first and otherwise go straight to recording
-  blocked rather than re-diagnosing the same proxy policy again. No financials have
-  been hand-entered yet; inventing page-cited numbers to fill the gap would
-  fabricate the model's input, so the honest state is recorded instead. What *is*
-  committed is the Day 2 schema — `data/GULFOILLUB/financials.csv` has the right
-  ten fiscal-year rows and line-item columns (validated by `reverse_dcf/financials.py`
-  and `tests/test_financials_schema.py`), every cell a `PENDING` placeholder — plus
-  one resolved modeling decision: transcription should prefer Gulf Oil Lubricants
-  India's *consolidated* statements once sourcing unblocks, falling back to
-  standalone per-filing only where no consolidated statement exists. See
-  [`research/sources.md`](research/sources.md) for the full history and the two
-  concrete ways to resume: an egress allowlist change, or a human dropping the
-  source annual-report PDFs into `sources/raw/GULFOILLUB/` for offline transcription.
+- **Day 2's financials are standalone, not consolidated**, for all ten years -
+  a comparability call, not a data-quality one. Gulf Oil Lubricants India had
+  no subsidiary for nine of the ten fiscal years; its Consolidated Financial
+  Statements only become substantive in FY2023-24, the same year a subsidiary
+  was acquired mid-year, so a consolidated FY2023-24 would carry a partial-year
+  acquisition discontinuity that standalone-across-all-ten-years avoids. See
+  `research/sources.md`'s revised-decision entry for the full reasoning.
+- **`ebit`, `ebitda` and `net_working_capital` are derived, not reported
+  figures.** Ind AS statements after FY2016-17 don't report an EBITDA
+  subtotal, so `ebit` = Profit before tax + Finance costs, and `ebitda` =
+  `ebit` + D&A - checked against the two years (FY2014-15, FY2015-16) whose
+  P&L does report that subtotal explicitly, where it matches exactly.
+  `net_working_capital` nets cash and debt out of current assets/liabilities.
+  Every derivation rule is documented once in `research/sources.md`'s
+  methodology section and in the `reverse_dcf/financials.py` module docstring,
+  rather than re-justified per cell in the citation ledger.
+- **FY2014-15 isn't a normal first year.** Gulf Oil Lubricants India Limited
+  was a shell company until mid-2014; the lubricants business was transferred
+  in via a Scheme of Arrangement that fiscal year, so FY2014-15→FY2015-16
+  growth reflects a restructuring, not organic year-one-to-year-two growth.
+  Worth remembering when Day 5/6 reads the implied-CAGR trend against history.
+- **Two years were sourced off Gulf Oil's own site.** FY2018-19's bound annual
+  report isn't listed on `india.gulfoilltd.com`'s own archive (only ancillary
+  filings for that year are) - sourced from BSE India's corporate-filings
+  mirror instead, cover page confirmed. FY2022-23 is filed under an unrelated
+  name (`Gulf_Oil_AR_2023_C2C_Design...pdf`) rather than the usual
+  "Annual Report" naming - confirmed by its own cover page before use.
+- Ten years of hand-entered financials is still a small sample and a
+  transcription risk despite the citation ledger - every figure in
+  `data/GULFOILLUB/financials.csv` traces to a specific PDF and page in
+  `research/sources.md`, so a reviewer can check any cell against the source.
 
 ## Where this sits
 
