@@ -29,12 +29,14 @@ Every source is free. Nothing in this project requires a paid tier, a subscripti
 ```bash
 uv venv && source .venv/bin/activate
 uv pip install -r requirements.txt
-python -m reverse_dcf.solve --ticker EXAMPLE.NS --price 1234.50
 python -m reverse_dcf.wacc                         # Day 3: WACC assumptions block for Gulf Oil
 python -m reverse_dcf.forward --growth 0.10 --years 10   # Day 4: forward FCFF DCF at an assumed growth rate
+python -m reverse_dcf.solve                         # Day 5: reverse solver against the committed market-price fixture
+python -m reverse_dcf.solve --grid                  # ...plus the margin x reinvestment sensitivity grid
+python -m reverse_dcf.solve --price 1234.50          # override the fixture with an explicit price
 ```
 
-Runs offline against committed fixtures by default. Live data needs a key in `.env` (see `.env.example`); the fixture path is the default so nothing blocks on network access. `reverse_dcf.wacc` reads its Damodaran/FRED inputs from `fixtures/wacc/*.csv`, committed CSVs - refreshing them from live sources needs `scripts/fetch_wacc_inputs.py`, which is not on the module's runtime path. `reverse_dcf.forward` takes `--growth` explicitly (it has no honest default - that is the number Day 5's solver exists to find) and derives every other assumption (EBIT margin, reinvestment rate, tax rate, WACC, terminal growth) from the latest fiscal year in `data/GULFOILLUB/financials.csv` and Day 3's WACC module; `--margin` and `--reinvestment-rate` override the derived defaults for sensitivity checks.
+Runs offline against committed fixtures by default. Live data needs a key in `.env` (see `.env.example`); the fixture path is the default so nothing blocks on network access. `reverse_dcf.wacc` reads its Damodaran/FRED inputs from `fixtures/wacc/*.csv`, committed CSVs - refreshing them from live sources needs `scripts/fetch_wacc_inputs.py`, which is not on the module's runtime path. `reverse_dcf.forward` takes `--growth` explicitly (it has no honest default - that is the number Day 5's solver exists to find) and derives every other assumption (EBIT margin, reinvestment rate, tax rate, WACC, terminal growth) from the latest fiscal year in `data/GULFOILLUB/financials.csv` and Day 3's WACC module; `--margin` and `--reinvestment-rate` override the derived defaults for sensitivity checks. `reverse_dcf.solve` reads its market price from `fixtures/market/<TICKER>.csv` by default (refresh with `scripts/fetch_market_price.py`, also off the runtime path) or takes `--price` directly, and runs `scipy.optimize.brentq` on the forward engine to find the growth rate that reproduces it.
 
 ## Findings
 
@@ -54,6 +56,38 @@ cited cell-by-cell in `research/sources.md`). Revenue from operations grew from
 window - whether that pace is what today's price already assumes going forward
 is exactly what the reverse solver (Day 5) exists to answer, not something to
 eyeball here.
+
+Day 5 built the reverse solver (`reverse_dcf/solve.py`): `scipy.optimize.brentq`
+on Day 4's forward engine, searching for the constant explicit-period revenue
+growth rate that reproduces a given market price. Solving against **today's
+actual price (₹1,061/share, screener.in, 2026-09-12)** at the FY2023-24 base
+case (13.37% margin, -15.68% reinvestment) gives an **implied 10-year growth
+rate of -0.49%** — the market is pricing in essentially flat-to-slightly-declining
+revenue, not growth. That is a real surprise against Day 2's finding of a
+~14.5% ten-year realized revenue CAGR: at today's price, expectations sit
+*well below* history, the opposite of the "expectations exceed history"
+placeholder in this project's own contract spec — worth treating as a live
+finding to interrogate in Day 6, not a mistake to explain away. The price
+moved materially even against Day 1's ~₹1,140-1,180 shortlist-day estimate
+from three days earlier, so this is one noisy snapshot, not a settled
+number — see limitations. A second, more conservative number,
+**perpetual breakeven growth of 3.52%**, answers a related question: what
+constant growth, held forever with no assumed slowdown, would justify the
+price — reusing the exact forecast_years=1/terminal_growth=growth
+equivalence `tests/test_forward.py` already proves collapses the forward
+engine to the textbook single-stage Gordon growth formula, so it needed no
+new pricing method. Both numbers **round-trip**: feeding the solved growth
+back through `reverse_dcf.forward.run_dcf` reproduces the target price to
+within a paisa, the actual correctness gate this repo is built around
+(`tests/test_solve.py`). A grid over all nine year-pairs of Gulf Oil's own
+historically realized (margin, reinvestment) combinations shows the implied
+growth swinging from about -5% to +25% depending which year's operating
+profile is assumed to continue — the single-year base case is not a
+robust anchor on its own, which is exactly why Day 6 needs the multi-year
+comparison rather than reading this one number in isolation. 14 new tests
+(57/57 pass); CLI run directly with the default fixture price, `--grid`,
+`--price` override, and the unreachable-target error path all exercised by
+hand, not just under pytest.
 
 Day 4 built the forward FCFF DCF engine (`reverse_dcf/forward.py`) that Day 5's
 reverse solver will call inside a root-finder. Revenue grows at a single constant
@@ -181,14 +215,45 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   `reverse_dcf/` (`wacc.py`, `financials.py`); a separate top-level `dcf/`
   package for one file would fragment the layout for no benefit. The Day 4
   output artifact is unchanged, only its path.
-- **The implied share price at any single growth assumption is not yet
-  validated against a round-trip.** Day 4 only checks that the forward engine
-  is internally consistent (it collapses to the textbook Gordon growth value
-  when explicit and terminal growth match, see `tests/test_forward.py`) and
-  that a plausible base case produces a plausible price. Whether the engine
-  can reproduce today's actual price for *some* growth rate - the real
-  correctness gate this repo is built around - is Day 5's reverse solver to
-  prove.
+- **The market price the reverse solver targets is a single live snapshot,
+  not a robust estimate.** `fixtures/market/GULFOILLUB.csv` was fetched from
+  screener.in on 2026-09-12 (₹1,061/share) - three days after Day 1's
+  shortlist noted ~₹1,140-1,180, already a ~7-9% move. Re-running
+  `scripts/fetch_market_price.py` on a different day will move the implied
+  growth number, sometimes by more than the underlying investment thesis
+  changed. The implied-growth *sign* (flat-to-negative vs. Day 2's realized
+  14.5% CAGR) is unlikely to flip on typical daily noise, but the exact
+  percentage should not be quoted to two decimal places in the write-up.
+- **The base-case margin and reinvestment rate are frozen at one fiscal
+  year's actuals**, same caveat as Day 4's forward engine but now sharper:
+  `reverse_dcf/solve.py`'s sensitivity grid (`--grid`) shows the implied
+  growth swinging from roughly -5% to +25% across Gulf Oil's own nine
+  realized (margin, reinvestment) year-pairs - a wide enough range that the
+  single base-case number in the headline summary understates how sensitive
+  the "market's growth assumption" framing really is to which year you pick
+  as normal.
+- **The reverse solver assumes one root exists and is unique** (relies on
+  `run_dcf`'s implied price being monotonic in growth over the search
+  bracket, true for every combination checked here since the reinvestment
+  rate stays below 100%) rather than proving it in general; a combination
+  where reinvestment rate exceeds 100% flips FCFF negative for every
+  forecast year and can put the target price out of `brentq`'s bracket
+  entirely - the grid shows this as `n/a` cells rather than a wrong number,
+  but it is a real gap for a company whose reinvestment rate swings as
+  wildly (-15.68% to +104%) as Gulf Oil's does across its own ten years.
+- **"Implied growth" and "breakeven growth" answer different questions and
+  are not the same number by design.** The former assumes 10 years of the
+  quoted growth rate followed by a slower terminal decay (matching the
+  forward engine's existing shape); the latter assumes the same growth rate
+  holds forever with no deceleration at all, so it is always the lower,
+  more conservative of the two. Reporting only one of them in Day 8's
+  write-up would overstate or understate how demanding the market's
+  assumption really is - both belong in the final note.
+- **The round-trip check is now real** (Day 4's version of this limitation
+  said it wasn't yet proven): `tests/test_solve.py` feeds every solved
+  growth rate back through `reverse_dcf.forward.run_dcf` and asserts the
+  target price reproduces to within a paisa. That is the correctness gate
+  this repo is built around, not a nice-to-have test.
 
 ## Where this sits
 
