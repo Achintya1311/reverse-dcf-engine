@@ -2,7 +2,7 @@
 
 Takes a share price as given and solves for the growth, margin and reinvestment the market must already believe — then asks whether those assumptions are plausible.
 
-**Status:** Last checkpoint 2026-09-12 · Next: Day 6 - set the implied figures (10-year implied growth, perpetual breakeven growth, and the margin/reinvestment sensitivity grid) against Gulf Oil's own ten-year realized history and two or three peers - a comparison table, the actual argument this project exists to make
+**Status:** Last checkpoint 2026-09-12 · Next: Day 7 - sensitivity analysis and tornado chart (outputs/tornado.png)
 
 ## What this is
 
@@ -23,6 +23,7 @@ Every source is free. Nothing in this project requires a paid tier, a subscripti
 - NSE / BSE filings and annual reports - ten years of financials, hand-entered and cited to page
 - Damodaran Online (NYU Stern) - India equity risk premium and industry betas, updated annually
 - FRED / RBI - risk-free rate
+- screener.in - free, no login required; current market price (Day 5) and peer companies' realized ten-year sales growth (Day 6)
 
 ## How to run
 
@@ -34,9 +35,10 @@ python -m reverse_dcf.forward --growth 0.10 --years 10   # Day 4: forward FCFF D
 python -m reverse_dcf.solve                         # Day 5: reverse solver against the committed market-price fixture
 python -m reverse_dcf.solve --grid                  # ...plus the margin x reinvestment sensitivity grid
 python -m reverse_dcf.solve --price 1234.50          # override the fixture with an explicit price
+python -m reverse_dcf.compare                       # Day 6: implied growth vs. Gulf Oil's own history vs. 3 lubricant peers
 ```
 
-Runs offline against committed fixtures by default. Live data needs a key in `.env` (see `.env.example`); the fixture path is the default so nothing blocks on network access. `reverse_dcf.wacc` reads its Damodaran/FRED inputs from `fixtures/wacc/*.csv`, committed CSVs - refreshing them from live sources needs `scripts/fetch_wacc_inputs.py`, which is not on the module's runtime path. `reverse_dcf.forward` takes `--growth` explicitly (it has no honest default - that is the number Day 5's solver exists to find) and derives every other assumption (EBIT margin, reinvestment rate, tax rate, WACC, terminal growth) from the latest fiscal year in `data/GULFOILLUB/financials.csv` and Day 3's WACC module; `--margin` and `--reinvestment-rate` override the derived defaults for sensitivity checks. `reverse_dcf.solve` reads its market price from `fixtures/market/<TICKER>.csv` by default (refresh with `scripts/fetch_market_price.py`, also off the runtime path) or takes `--price` directly, and runs `scipy.optimize.brentq` on the forward engine to find the growth rate that reproduces it.
+Runs offline against committed fixtures by default. Live data needs a key in `.env` (see `.env.example`); the fixture path is the default so nothing blocks on network access. `reverse_dcf.wacc` reads its Damodaran/FRED inputs from `fixtures/wacc/*.csv`, committed CSVs - refreshing them from live sources needs `scripts/fetch_wacc_inputs.py`, which is not on the module's runtime path. `reverse_dcf.forward` takes `--growth` explicitly (it has no honest default - that is the number Day 5's solver exists to find) and derives every other assumption (EBIT margin, reinvestment rate, tax rate, WACC, terminal growth) from the latest fiscal year in `data/GULFOILLUB/financials.csv` and Day 3's WACC module; `--margin` and `--reinvestment-rate` override the derived defaults for sensitivity checks. `reverse_dcf.solve` reads its market price from `fixtures/market/<TICKER>.csv` by default (refresh with `scripts/fetch_market_price.py`, also off the runtime path) or takes `--price` directly, and runs `scipy.optimize.brentq` on the forward engine to find the growth rate that reproduces it. `reverse_dcf.compare` reads its peer figures from `fixtures/peers/lubricants.csv` (refresh with `scripts/fetch_peer_comparables.py`, off the runtime path) and sets Day 5's implied growth and breakeven growth against Gulf Oil's own realized ten-year revenue CAGR (computed straight from `data/GULFOILLUB/financials.csv`) and three lubricant/oil peers' realized ten-year revenue CAGR.
 
 ## Findings
 
@@ -56,6 +58,36 @@ cited cell-by-cell in `research/sources.md`). Revenue from operations grew from
 window - whether that pace is what today's price already assumes going forward
 is exactly what the reverse solver (Day 5) exists to answer, not something to
 eyeball here.
+
+Day 6 set Day 5's implied figures against Gulf Oil's own ten-year realized
+history and three lubricant/oil peers (`reverse_dcf/compare.py`,
+`python -m reverse_dcf.compare`). The comparison table is the actual
+argument this project exists to make: at today's price, the market is
+implying a **10-year revenue CAGR of -0.49%** (or, on the more forgiving
+perpetual-breakeven framing, **3.52% forever**) - both **well below Gulf
+Oil's own realized 10-year revenue CAGR of 14.54%** (computed directly
+from `data/GULFOILLUB/financials.csv`, `historical_revenue_cagr()`), and
+below **every one of the three lubricant peers checked**: Castrol India
+(6.0%), Gandhar Oil Refinery (9.0%, consolidated - its standalone entity's
+compounded-sales-growth series is too short for a 10-year figure, the same
+kind of standalone-vs-consolidated judgment call Day 2 already had to make
+for Gulf Oil itself), and Savita Oil Technologies (11.0%). So the one
+sentence this project exists to produce is not "expectations exceed
+history" (the contract spec's placeholder) but its mirror image: *at
+today's price the market is pricing in essentially flat-to-declining
+revenue for Gulf Oil, a bar every comparable lubricant company - Gulf Oil's
+own past included - has cleared over the last ten years.* Sourced from
+screener.in's free "Compounded Sales Growth" ranges table
+(`scripts/fetch_peer_comparables.py`, committed to
+`fixtures/peers/lubricants.csv`), the same free-tier, no-login source
+`fetch_market_price.py` already uses. As a sanity check, screener's own
+10-year figure for Gulf Oil (15%, standalone) is committed alongside the
+peers and is close to but not identical with this project's own
+14.54% - both trace to the same underlying revenue series, so the ~0.5pt
+gap is rounding and a possible small difference in what each source counts
+as "revenue" (see limitations), not a data error worth chasing further. 9
+new tests, 66/66 pass; the CLI run directly against the default fixture
+price and a `--price` override.
 
 Day 5 built the reverse solver (`reverse_dcf/solve.py`): `scipy.optimize.brentq`
 on Day 4's forward engine, searching for the constant explicit-period revenue
@@ -250,6 +282,36 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   more conservative of the two. Reporting only one of them in Day 8's
   write-up would overstate or understate how demanding the market's
   assumption really is - both belong in the final note.
+- **The peer set is three companies, chosen for being recognizable
+  lubricant/oil comparables (Castrol India, Savita Oil Technologies, Gandhar
+  Oil Refinery), not a systematic screen** the way Day 1 screened candidate
+  companies to model. A different reasonable peer set (e.g. Tide Water Oil
+  /Veedol, whose screener.in page did not resolve cleanly and was dropped
+  rather than guessed at) could show a different range - three points is
+  enough to say "Gulf Oil isn't uniquely fast-growing" but not enough for a
+  statistical claim.
+- **Peer growth figures are screener.in's own "Compounded Sales Growth"
+  calculation, not this project's own transcription** - unlike Gulf Oil's
+  own financials, no peer got a full Day-2-style hand-entry with page
+  citations. That is a deliberate scope choice (transcribing ten years of
+  three more companies is its own multi-day project, not a bounded Day 6
+  chunk), but it means peer numbers are trusted to a third-party
+  aggregator's methodology rather than independently reproduced.
+- **Gandhar Oil Refinery's peer figure is its *consolidated* 10-year sales
+  CAGR; the other two peers and Gulf Oil itself use *standalone*.**
+  Gandhar's standalone entity is too recently restructured for
+  screener.in to compute a 10-year standalone figure (blank cell, not a
+  wrong number) - consolidated was the only free source with a real
+  10-year figure, so it is used and flagged rather than silently mixed in
+  as if it were on the same basis as the others.
+- **Screener.in's own 10-year sales CAGR for Gulf Oil (15%) and this
+  project's own computed figure (14.54%) are close but not identical**,
+  both derived from the same underlying reported revenue. The small gap is
+  most likely rounding (screener displays whole percent) or a difference in
+  exactly which revenue line screener treats as "Sales" versus this
+  project's `revenue` column (Day 2's `research/sources.md` documents the
+  exact statement line used here) - worth knowing about, not worth
+  reconciling to the decimal for a sanity-check row.
 - **The round-trip check is now real** (Day 4's version of this limitation
   said it wasn't yet proven): `tests/test_solve.py` feeds every solved
   growth rate back through `reverse_dcf.forward.run_dcf` and asserts the
