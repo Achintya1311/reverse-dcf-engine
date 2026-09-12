@@ -112,6 +112,7 @@ def implied_growth(
     terminal_growth: float | None = None,
     ebit_margin: float | None = None,
     reinvestment_rate: float | None = None,
+    wacc: float | None = None,
     bracket: tuple[float, float] = GROWTH_BRACKET,
 ) -> float:
     """Solve the explicit-period revenue growth that reproduces ``target_price``.
@@ -119,7 +120,8 @@ def implied_growth(
     Every other assumption comes from :func:`base_case_from_financials`
     (the latest fiscal year's actuals and Day 3's WACC) unless overridden -
     ``ebit_margin``/``reinvestment_rate`` overrides are what
-    :func:`grid_implied_growth` sweeps.
+    :func:`grid_implied_growth` sweeps, and ``wacc`` is what
+    :mod:`reverse_dcf.sensitivity`'s tornado chart shocks alongside them.
     """
     base = base_case_from_financials(
         financials_path, revenue_growth=0.0, forecast_years=forecast_years, terminal_growth=terminal_growth
@@ -128,6 +130,8 @@ def implied_growth(
         base = replace(base, ebit_margin=ebit_margin)
     if reinvestment_rate is not None:
         base = replace(base, reinvestment_rate=reinvestment_rate)
+    if wacc is not None:
+        base = replace(base, wacc=wacc)
 
     def price_gap(g: float) -> float:
         return run_dcf(replace(base, revenue_growth=g)).implied_share_price - target_price
