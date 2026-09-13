@@ -36,13 +36,35 @@ python -m reverse_dcf.solve                         # Day 5: reverse solver agai
 python -m reverse_dcf.solve --grid                  # ...plus the margin x reinvestment sensitivity grid
 python -m reverse_dcf.solve --price 1234.50          # override the fixture with an explicit price
 python -m reverse_dcf.compare                       # Day 6: implied growth vs. Gulf Oil's own history vs. 3 lubricant peers
+python -m reverse_dcf.sensitivity                    # Day 7: tornado chart, outputs/tornado.png
+python scripts/render_report_pdf.py                  # Day 8: render REPORT.md to outputs/REPORT.pdf
 ```
 
 Runs offline against committed fixtures by default. Live data needs a key in `.env` (see `.env.example`); the fixture path is the default so nothing blocks on network access. `reverse_dcf.wacc` reads its Damodaran/FRED inputs from `fixtures/wacc/*.csv`, committed CSVs - refreshing them from live sources needs `scripts/fetch_wacc_inputs.py`, which is not on the module's runtime path. `reverse_dcf.forward` takes `--growth` explicitly (it has no honest default - that is the number Day 5's solver exists to find) and derives every other assumption (EBIT margin, reinvestment rate, tax rate, WACC, terminal growth) from the latest fiscal year in `data/GULFOILLUB/financials.csv` and Day 3's WACC module; `--margin` and `--reinvestment-rate` override the derived defaults for sensitivity checks. `reverse_dcf.solve` reads its market price from `fixtures/market/<TICKER>.csv` by default (refresh with `scripts/fetch_market_price.py`, also off the runtime path) or takes `--price` directly, and runs `scipy.optimize.brentq` on the forward engine to find the growth rate that reproduces it. `reverse_dcf.compare` reads its peer figures from `fixtures/peers/lubricants.csv` (refresh with `scripts/fetch_peer_comparables.py`, off the runtime path) and sets Day 5's implied growth and breakeven growth against Gulf Oil's own realized ten-year revenue CAGR (computed straight from `data/GULFOILLUB/financials.csv`) and three lubricant/oil peers' realized ten-year revenue CAGR.
 
 ## Findings
 
-Nothing on the valuation itself yet. Day 1 shortlisted three NSE mid-caps that fit the
+Day 8 wrote [`REPORT.md`](REPORT.md), the two-page write-up this whole project exists to
+produce, rendered to `outputs/REPORT.pdf` by a new `scripts/render_report_pdf.py`
+(plain-text/table typesetting via matplotlib's `PdfPages` - no new dependency, since
+matplotlib is already required for Day 7's tornado chart). It states the actual headline
+sentence plainly: at today's price (₹1,061.00/share), the market is pricing in essentially
+flat-to-declining revenue for Gulf Oil (-0.49% 10-year implied CAGR, or 3.52% on the more
+forgiving perpetual-breakeven framing) - well below Gulf Oil's own realized 14.54% and below
+every peer checked. The write-up also does the thing Day 6/7's numbers alone didn't: it
+separates the real finding from the modeling noise, since Day 7's own sensitivity grid shows
+implied growth ranging -5% to +25% depending which of Gulf Oil's nine historically realized
+(margin, reinvestment) year-pairs is assumed to persist - the headline direction survives that
+range (even the grid's +25% high end stays under the realized 14.54%), but the exact decimal
+should not be read as precise. `scripts/render_report_pdf.py` handles exactly the Markdown
+subset `REPORT.md` uses (headers, bullets, pipe tables, blank-line paragraphs, `---` as an
+explicit page break) and errors rather than silently mis-rendering anything else; long table
+cells are truncated with an ellipsis rather than overflowing the page, trimming only the widest
+column in a row so short labels (company names, percentages) stay intact. 10 new tests,
+87/87 pass; the CLI run directly, output inspected page-by-page as rendered PNGs to check
+for text overlap or clipping before committing.
+
+Nothing else on the valuation itself before this. Day 1 shortlisted three NSE mid-caps that fit the
 ₹5,000–50,000 cr / thin-coverage / one-line-business screen and picked Kirloskar Ferrous
 Industries to take through the reverse DCF, made by the automated run itself since no live
 user was available that day. Achintya reviewed it and asked for a different sector plus
