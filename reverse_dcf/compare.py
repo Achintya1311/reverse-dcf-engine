@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PEERS = ROOT / "fixtures" / "peers" / "lubricants.csv"
 
 
-def historical_revenue_cagr(financials_path: str | Path = DEFAULT_FINANCIALS) -> float:
+def historical_revenue_cagr(financials_path: str | Path = DEFAULT_FINANCIALS, *, skip_years: int = 0) -> float:
     """Gulf Oil's own realized revenue CAGR across every fiscal year in ``financials_path``.
 
     ``(last year's revenue / first year's revenue) ** (1 / (N-1)) - 1`` over
@@ -40,9 +40,16 @@ def historical_revenue_cagr(financials_path: str | Path = DEFAULT_FINANCIALS) ->
     quoted since Day 2, now computed rather than eyeballed, so it can be
     asserted against in a test instead of re-typed by hand each time a
     fiscal year is added.
+
+    ``skip_years`` drops that many earliest fiscal years before computing -
+    added for Day 9's grilling pass (:mod:`reverse_dcf.grill`), which uses
+    ``skip_years=1`` to recompute this CAGR with FY2014-15 (the flagged
+    restructuring year, see the README's own limitations entry) dropped as
+    the base year, to check whether that flagged year is propping up the
+    headline realized-growth number.
     """
     df = to_numeric(load_financials(financials_path)).set_index("fiscal_year")
-    years = list(df.index)
+    years = list(df.index)[skip_years:]
     if len(years) < 2:
         raise ValueError("need at least two fiscal years to compute a CAGR")
     first, last = df.loc[years[0], "revenue"], df.loc[years[-1], "revenue"]

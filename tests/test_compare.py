@@ -17,6 +17,16 @@ def test_historical_revenue_cagr_matches_the_readme_figure():
     assert cagr == pytest.approx(0.1454, abs=0.001)
 
 
+def test_historical_revenue_cagr_skip_years_drops_the_earliest_fiscal_years():
+    # Day 9's base-year robustness check (reverse_dcf.grill) uses this to
+    # recompute the realized CAGR with the flagged FY2014-15 restructuring
+    # year dropped as the base.
+    default_cagr = historical_revenue_cagr(DEFAULT_FINANCIALS)
+    skipped_cagr = historical_revenue_cagr(DEFAULT_FINANCIALS, skip_years=1)
+    assert skipped_cagr != pytest.approx(default_cagr)
+    assert skipped_cagr == pytest.approx(0.1586, abs=0.001)
+
+
 def test_historical_revenue_cagr_rejects_a_single_year(tmp_path):
     one_year = tmp_path / "one_year.csv"
     header = ",".join(

@@ -89,6 +89,31 @@ Whether that's the market correctly discounting a maturing lubricants franchise,
 overreaction to one volatile balance-sheet year, is outside what a single-company DCF can
 settle — see limitations.
 
+### Day 9 — attacking the conclusion
+
+Two checks against the two modeling choices above that had never actually been varied in
+Days 1–8, run mechanically (`python -m reverse_dcf.grill`) rather than argued in prose:
+
+1. **Is the 14.54% realized-history anchor itself propped up by a bad base year?** The
+   README already flags FY2014-15 as "not a normal first year" — Gulf Oil was a shell company
+   until a Scheme of Arrangement transferred the lubricants business in that fiscal year — and
+   an unrepresentative base year could inflate the realized-CAGR side of this project's whole
+   comparison, narrowing the gap the headline rests on. Recomputing with FY2014-15 dropped
+   (base year FY2015-16 instead) gives **15.86%**, *higher* than the 14.54% figure used
+   throughout this report, not lower. The flagged year was, if anything, holding the realized
+   number down, not propping it up — this attack does not survive.
+2. **Is the negative-implied-growth finding an artifact of the forecast_years=10 convention?**
+   Every number above uses a 10-year explicit horizon by convention, never varied. Rerunning
+   Day 5's solver from a 5-year to a 15-year horizon moves implied growth from -5.79% to
+   +1.28% — a real, non-trivial swing — but even at the most generous end tested (15 years),
+   1.28% implied growth is still more than 13 percentage points below Gulf Oil's own realized
+   growth on either base year. This attack also does not survive.
+
+Neither check moved the headline conclusion; if anything, both narrow the room for the finding
+to be a modeling artifact rather than a real gap between price and history. `tests/test_grill.py`
+pins both results so a future fiscal year or price update that changes them fails loudly rather
+than silently.
+
 ## Limitations
 
 - **The price is a single live snapshot.** ₹1,061.00/share (2026-09-12) is already a 7-9%
@@ -104,6 +129,12 @@ settle — see limitations.
 - **Implied growth and perpetual breakeven answer different questions on purpose** (10 years
   then terminal decay, vs. the same rate forever) and are not meant to converge; both belong
   in the finding.
+- **The 10-year explicit forecast horizon is a convention, not a derived number, and it
+  moves the answer.** Day 9's grilling pass (above) found implied growth swinging from
+  -5.79% at a 5-year horizon to +1.28% at 15 years — a real lever nobody had shocked before
+  Day 9, similar in kind to the reinvestment-rate lever already in the tornado chart. It did
+  not change the finding's direction here, but a shorter or longer horizon changes the exact
+  number more than most of the tornado's own shocks do.
 - **The peer set is three recognizable comparables, not a systematic screen**, and one of the
   three (Gandhar) is consolidated where the other two and Gulf Oil itself are standalone —
   its standalone entity is too recently restructured for screener.in to compute a 10-year
@@ -133,8 +164,9 @@ negative reinvestment rate as the outlier it looks like rather than the new norm
 
 ---
 
-*Prepared as Day 8 of a bounded, day-by-day build. Methodology, data sources, and the full
-checkpoint log are in [`README.md`](README.md). All figures above are reproduced live by
-`python -m reverse_dcf.solve`, `python -m reverse_dcf.compare`, and
-`python -m reverse_dcf.sensitivity` against the fixtures committed in this repo — nothing
-here is hand-typed from a prior run.*
+*Prepared as Day 8 of a bounded, day-by-day build; the Day 9 section above was added and
+attacked on Day 9. Methodology, data sources, and the full checkpoint log are in
+[`README.md`](README.md). All figures above are reproduced live by `python -m reverse_dcf.solve`,
+`python -m reverse_dcf.compare`, `python -m reverse_dcf.sensitivity`, and
+`python -m reverse_dcf.grill` against the fixtures committed in this repo — nothing here is
+hand-typed from a prior run.*
