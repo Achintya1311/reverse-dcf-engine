@@ -155,3 +155,25 @@ def test_cli_accepts_an_explicit_price_override(monkeypatch, capsys):
     main()
     out = capsys.readouterr().out
     assert "Rs1,500.00" in out
+
+
+def test_cli_contract_flag_writes_the_v0_7_json_block(monkeypatch, capsys, tmp_path):
+    import json
+    import sys
+
+    from reverse_dcf.solve import main
+
+    contract_path = tmp_path / "valuation.json"
+    monkeypatch.setattr(sys, "argv", ["solve.py", "--contract", str(contract_path)])
+    main()
+
+    out = capsys.readouterr().out
+    assert f"wrote valuation contract to {contract_path}" in out
+
+    written = json.loads(contract_path.read_text())
+    assert set(written["valuation"]) == {
+        "implied_cagr", "implied_ebit_margin", "implied_reinvestment", "breakeven_growth",
+    }
+    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
+    result = solve(market.price, DEFAULT_FINANCIALS, ticker="GULFOILLUB")
+    assert written == result.to_contract()

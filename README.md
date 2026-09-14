@@ -35,6 +35,7 @@ python -m reverse_dcf.forward --growth 0.10 --years 10   # Day 4: forward FCFF D
 python -m reverse_dcf.solve                         # Day 5: reverse solver against the committed market-price fixture
 python -m reverse_dcf.solve --grid                  # ...plus the margin x reinvestment sensitivity grid
 python -m reverse_dcf.solve --price 1234.50          # override the fixture with an explicit price
+python -m reverse_dcf.solve --contract valuation.json  # integration day: write the v0.7 spine contract as JSON
 python -m reverse_dcf.compare                       # Day 6: implied growth vs. Gulf Oil's own history vs. 3 lubricant peers
 python -m reverse_dcf.sensitivity                    # Day 7: tornado chart, outputs/tornado.png
 python scripts/render_report_pdf.py                  # Day 8: render REPORT.md to outputs/REPORT.pdf

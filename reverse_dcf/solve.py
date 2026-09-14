@@ -38,6 +38,7 @@ this explicitly rather than trusting the construction alone.
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -313,6 +314,13 @@ def main() -> None:
         action="store_true",
         help="also print the implied-growth grid over Gulf Oil's own ten-year margin/reinvestment history",
     )
+    parser.add_argument(
+        "--contract",
+        metavar="PATH",
+        default=None,
+        help="write the v0.7 valuation contract block (see to_contract()) as JSON to this path, "
+        "for the spine to read as a file -- never as a Python import",
+    )
     args = parser.parse_args()
 
     market = None
@@ -326,6 +334,12 @@ def main() -> None:
     print(result.summary())
     if market is not None:
         print(f"(price Rs{market.price:,.2f} from {market.source_url}, as of {market.date})")
+
+    if args.contract:
+        contract_path = Path(args.contract)
+        contract_path.parent.mkdir(parents=True, exist_ok=True)
+        contract_path.write_text(json.dumps(result.to_contract(), indent=2) + "\n")
+        print(f"\nwrote valuation contract to {contract_path}")
 
     if args.grid:
         margins, reinvestment = historical_margins_and_reinvestment(args.financials)
