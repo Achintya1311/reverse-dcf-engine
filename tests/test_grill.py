@@ -45,8 +45,15 @@ def test_horizon_sensitivity_stays_well_below_realized_history_at_every_horizon(
     # implied growth anywhere near Gulf Oil's own ~14.5%-15.9% realized
     # growth (see test_base_year_robustness_check_*) - the conclusion's
     # direction is not an artifact of the forecast_years=10 convention.
-    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
-    result = horizon_sensitivity(market.price, DEFAULT_FINANCIALS)
+    #
+    # V2 (CRITIQUES.md V1): the real market price is unreachable at the
+    # longer horizons under V2 (see test_solve.py), so this property is
+    # checked at a price reachable at every horizon in the default set
+    # instead -- the structural claim ("never anywhere near 14.5%") is
+    # about the model's shape, not about today's specific unreachable price.
+    reachable_price = 700.0
+    result = horizon_sensitivity(reachable_price, DEFAULT_FINANCIALS)
+    assert None not in result.values()
     assert max(result.values()) < 0.10
 
 
@@ -55,10 +62,25 @@ def test_horizon_sensitivity_increases_with_longer_horizons():
     # forecast before the (slower) terminal decay kicks in means less of
     # the low-growth terminal period is priced in, so implied growth should
     # rise monotonically with horizon for this company's assumptions.
-    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
-    result = horizon_sensitivity(market.price, DEFAULT_FINANCIALS)
+    # Same V2 reachable-price substitution as the test above.
+    reachable_price = 700.0
+    result = horizon_sensitivity(reachable_price, DEFAULT_FINANCIALS)
     values = [result[y] for y in sorted(result)]
     assert values == sorted(values)
+
+
+def test_horizon_sensitivity_reports_unreachable_horizons_as_none():
+    # V2 (CRITIQUES.md V1): at the real market price, longer horizons pay
+    # more years of growth-scaled reinvestment for the same growth rate, so
+    # some horizons that were reachable at a lower price stop being
+    # reachable at this one -- reported as None, not a crash or a
+    # fabricated number.
+    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
+    result = horizon_sensitivity(market.price, DEFAULT_FINANCIALS)
+    assert result[5] is not None and result[7] is not None
+    assert result[10] is None
+    assert result[12] is None
+    assert result[15] is None
 
 
 def test_cli_runs_end_to_end_against_the_committed_fixtures(monkeypatch, capsys):

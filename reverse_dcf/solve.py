@@ -3,11 +3,21 @@
 The forward engine (:mod:`reverse_dcf.forward`) takes growth as an input and
 prices a share; this module inverts it. Given today's actual market price it
 finds the constant explicit-period revenue growth rate that makes the
-forward engine reproduce that price exactly, holding every other assumption
-(margin, reinvestment, WACC, terminal growth) at Gulf Oil's own latest
-fiscal-year actuals from :func:`reverse_dcf.forward.base_case_from_financials`.
-That single number is the "implied CAGR" - what the market is already paying
-for.
+forward engine reproduce that price exactly, holding margin, WACC and
+terminal growth at Gulf Oil's own latest fiscal-year actuals from
+:func:`reverse_dcf.forward.base_case_from_financials`. That single number is
+the "implied CAGR" - what the market is already paying for.
+
+V2 (CRITIQUES.md V1): reinvestment is no longer in that "held fixed" list.
+V1 pinned it to one historical fiscal year's actual rate regardless of the
+growth being solved for, which could (and for Gulf Oil's own base case,
+did) pair a positive growth rate with a negative reinvestment rate - no
+real return on capital makes that combination possible. V2 instead
+re-derives reinvestment from whatever growth the root-finder is trying,
+via the fundamental growth identity and a ROIC that fades from the
+business's own historical median toward its cost of capital -- see
+:func:`reverse_dcf.forward.roic_fade_schedule` and
+:func:`reverse_dcf.forward.reinvestment_schedule_from_growth`.
 
 Two further outputs round this out, per ``NEXT_STEPS.md``'s Day 5 row:
 
@@ -43,16 +53,21 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pandas as pd
-from scipy.optimize import brentq
+from scipy.optimize import brentq, minimize_scalar
 
 from reverse_dcf.financials import load_financials, to_numeric
 from reverse_dcf.forward import (
     DEFAULT_FINANCIALS,
+    TERMINAL_ROIC_SPREAD_DEFAULT,
     base_case_from_financials,
+    historical_median_roic,
     historical_reinvestment_rate,
-    historical_roic,
+    historical_roic_by_year,
     is_working_capital_release_year,
+    reinvestment_schedule_from_growth,
+    roic_fade_schedule,
     run_dcf,
+    terminal_roic,
 )
 from reverse_dcf.wacc import effective_tax_rate
 
@@ -63,7 +78,16 @@ GROWTH_BRACKET = (-0.99, 10.0)
 """Search range for the 10-year implied-growth solve. Wide enough that a real
 root is always inside it if one exists (revenue can't shrink more than 99%/yr,
 and no equity story needs >1000%/yr growth to justify a price) - the bracket's
-job is only to bound the search, `run_dcf`'s own economics decide the root."""
+job is only to bound the search, `run_dcf`'s own economics decide the root.
+
+V2: when :func:`implied_growth` isn't given an explicit ``reinvestment_rate``
+override, this default upper end is clamped down to just below the
+growth/ROIC schedule's own lowest ROIC year (see that function and
+:func:`reverse_dcf.forward.roic_fade_schedule`) - past that point
+reinvestment exceeds 100% of NOPAT for at least one explicit year, which
+:func:`_solve_growth` can still search through (nothing raises), but which
+is no longer the ordinary growing-business case this bracket's width was
+originally sized for."""
 
 
 @dataclass(frozen=True)
@@ -94,17 +118,63 @@ def load_market_price(ticker: str = "GULFOILLUB", fixtures_dir: str | Path = MAR
     )
 
 
+class PriceUnreachableError(ValueError):
+    """No growth rate anywhere in the search bracket reproduces the target price.
+
+    Raised instead of the generic same-sign-at-both-ends message when
+    :func:`_solve_growth` has actually checked the bracket's own interior
+    extremum (not just its two endpoints) and confirmed there is no root at
+    all -- see that function's V2 docstring note. ``best_growth`` and
+    ``best_price_gap`` (``price(best_growth) - target_price``) are the
+    closest this bracket can get, so a caller can report *how* unreachable
+    the target is, not just that it is.
+    """
+
+    def __init__(self, message: str, best_growth: float, best_price_gap: float) -> None:
+        super().__init__(message)
+        self.best_growth = best_growth
+        self.best_price_gap = best_price_gap
+
+
 def _solve_growth(price_gap, bracket: tuple[float, float], label: str) -> float:
+    """Find the growth rate in ``bracket`` where ``price_gap`` (price at that growth minus
+    the target) crosses zero.
+
+    V1's fixed reinvestment rate made price strictly increasing in growth,
+    so same-sign endpoints always meant "the root is somewhere outside this
+    bracket." V2's reinvestment grows with the growth rate itself
+    (:func:`reverse_dcf.forward.reinvestment_schedule_from_growth`), so
+    price can rise then fall (or the reverse) *inside* the bracket - two
+    roots, one, or none, independent of what the two endpoints alone show.
+    Same-sign endpoints here first check the bracket's own interior
+    extremum before concluding there is no root, and if a root exists
+    between one endpoint and that extremum, solves on that half.
+    """
     lo, hi = bracket
     f_lo, f_hi = price_gap(lo), price_gap(hi)
-    if f_lo * f_hi > 0:
-        raise ValueError(
-            f"no {label} found in growth bracket {bracket}: implied price at "
-            f"{lo:.2%} growth is {f_lo:+.2f} away from target, at {hi:.2%} "
-            f"growth is {f_hi:+.2f} away - both on the same side, so the "
-            "target price is unreachable in this range at these assumptions"
+    if f_lo * f_hi <= 0:
+        return brentq(price_gap, lo, hi, xtol=1e-8)
+
+    if f_lo > 0:  # price stays above target at both ends -- look for a dip below it
+        probe = minimize_scalar(price_gap, bounds=bracket, method="bounded")
+        extreme_gap, extreme_g = probe.fun, probe.x
+    else:  # price stays below target at both ends -- look for a rise above it
+        probe = minimize_scalar(lambda g: -price_gap(g), bounds=bracket, method="bounded")
+        extreme_gap, extreme_g = -probe.fun, probe.x
+
+    if extreme_gap * f_lo > 0:
+        # same sign as the endpoints too: price never reaches the target anywhere in bracket.
+        raise PriceUnreachableError(
+            f"no {label} found anywhere in growth bracket {bracket}, not just outside it: "
+            f"implied price is {f_lo:+.2f} away from target at {lo:.2%} growth, {f_hi:+.2f} "
+            f"away at {hi:.2%}, and this bracket's own best case (growth {extreme_g:+.2%}) is "
+            f"still {extreme_gap:+.2f} away - the target price is unreachable at these assumptions",
+            best_growth=extreme_g,
+            best_price_gap=extreme_gap,
         )
-    return brentq(price_gap, lo, hi, xtol=1e-8)
+    if f_lo * extreme_gap <= 0:
+        return brentq(price_gap, lo, extreme_g, xtol=1e-8)
+    return brentq(price_gap, extreme_g, hi, xtol=1e-8)
 
 
 def implied_growth(
@@ -116,28 +186,65 @@ def implied_growth(
     ebit_margin: float | None = None,
     reinvestment_rate: float | None = None,
     wacc: float | None = None,
+    roic_spread: float = TERMINAL_ROIC_SPREAD_DEFAULT,
     bracket: tuple[float, float] = GROWTH_BRACKET,
 ) -> float:
     """Solve the explicit-period revenue growth that reproduces ``target_price``.
 
     Every other assumption comes from :func:`base_case_from_financials`
     (the latest fiscal year's actuals and Day 3's WACC) unless overridden -
-    ``ebit_margin``/``reinvestment_rate`` overrides are what
-    :func:`grid_implied_growth` sweeps, and ``wacc`` is what
-    :mod:`reverse_dcf.sensitivity`'s tornado chart shocks alongside them.
+    ``ebit_margin`` is what :func:`grid_implied_growth` sweeps alongside
+    ``reinvestment_rate``, and ``wacc`` is what
+    :mod:`reverse_dcf.sensitivity`'s tornado chart shocks alongside both.
+
+    V2: when ``reinvestment_rate`` is *not* given, reinvestment is not a
+    fixed historical number either -- it is re-derived for every growth rate
+    the root-finder tries, via :func:`reverse_dcf.forward.roic_fade_schedule`
+    and :func:`reverse_dcf.forward.reinvestment_schedule_from_growth`, the
+    same way :func:`base_case_from_financials` now does by default
+    (CRITIQUES.md V1). Passing an explicit ``reinvestment_rate`` bypasses
+    that and goes back to a flat rate for every year, same as V1 - the
+    escape hatch :func:`grid_implied_growth` and
+    :mod:`reverse_dcf.sensitivity`'s reinvestment-rate shock both still use
+    deliberately, since they are testing "what if this flat historical rate
+    persisted" rather than the growth-consistent model.
     """
     base = base_case_from_financials(
-        financials_path, revenue_growth=0.0, forecast_years=forecast_years, terminal_growth=terminal_growth
+        financials_path,
+        revenue_growth=0.0,
+        forecast_years=forecast_years,
+        terminal_growth=terminal_growth,
+        wacc=wacc,
+        roic_spread=roic_spread,
     )
     if ebit_margin is not None:
         base = replace(base, ebit_margin=ebit_margin)
+
     if reinvestment_rate is not None:
         base = replace(base, reinvestment_rate=reinvestment_rate)
-    if wacc is not None:
-        base = replace(base, wacc=wacc)
 
-    def price_gap(g: float) -> float:
-        return run_dcf(replace(base, revenue_growth=g)).implied_share_price - target_price
+        def price_gap(g: float) -> float:
+            return run_dcf(replace(base, revenue_growth=g)).implied_share_price - target_price
+    else:
+        median_roic = historical_median_roic(financials_path)
+        roic_schedule = roic_fade_schedule(median_roic, terminal_roic(base.wacc, roic_spread), forecast_years)
+        if bracket is GROWTH_BRACKET:
+            # V2: unlike V1's fixed reinvestment rate, reinvestment = g / roic
+            # grows without bound as g rises, passing 100% once g exceeds the
+            # schedule's lowest ROIC year - past that, FCFF for that year (and,
+            # soon after, the whole explicit period) goes negative, and implied
+            # price stops being monotonic in g. GROWTH_BRACKET's wide default
+            # upper end (1000%/yr, sized for V1's always-monotonic pricing) can
+            # straddle more than one root there, so when the caller leaves the
+            # default bracket alone, clamp its upper end below the schedule's
+            # own floor - the same "growth can't exceed the ROIC available to
+            # fund it" bound perpetual_breakeven_growth already enforces against
+            # wacc for the one-year case.
+            bracket = (bracket[0], min(roic_schedule) - 1e-6)
+
+        def price_gap(g: float) -> float:
+            schedule = reinvestment_schedule_from_growth(g, roic_schedule)
+            return run_dcf(replace(base, revenue_growth=g, reinvestment_rate=schedule)).implied_share_price - target_price
 
     return _solve_growth(price_gap, bracket, "implied growth")
 
@@ -148,6 +255,7 @@ def perpetual_breakeven_growth(
     *,
     ebit_margin: float | None = None,
     reinvestment_rate: float | None = None,
+    roic_spread: float = TERMINAL_ROIC_SPREAD_DEFAULT,
 ) -> float:
     """The single constant growth rate, held forever, that reproduces ``target_price``.
 
@@ -161,16 +269,34 @@ def perpetual_breakeven_growth(
     conservative bar: a business priced for 10 years of fast growth then a
     slowdown needs a *higher* 10-year number than it would need if that pace
     literally never ended.
+
+    V2: with no ``reinvestment_rate`` override, reinvestment is
+    ``revenue_growth / terminal_roic`` -- :func:`reverse_dcf.forward.roic_fade_schedule`
+    with ``forecast_years=1`` always resolves to the terminal ROIC anchor,
+    on the reasoning that one explicit year immediately followed by the
+    same rate forever *is* the terminal state, not a fading-from-median
+    window (there is no "from" with only one year).
     """
-    base = base_case_from_financials(financials_path, revenue_growth=0.0, forecast_years=1, terminal_growth=0.0)
+    base = base_case_from_financials(
+        financials_path, revenue_growth=0.0, forecast_years=1, terminal_growth=0.0, roic_spread=roic_spread
+    )
     if ebit_margin is not None:
         base = replace(base, ebit_margin=ebit_margin)
-    if reinvestment_rate is not None:
-        base = replace(base, reinvestment_rate=reinvestment_rate)
     wacc = base.wacc
 
-    def price_gap(g: float) -> float:
-        return run_dcf(replace(base, revenue_growth=g, terminal_growth=g)).implied_share_price - target_price
+    if reinvestment_rate is not None:
+        base = replace(base, reinvestment_rate=reinvestment_rate)
+
+        def price_gap(g: float) -> float:
+            return run_dcf(replace(base, revenue_growth=g, terminal_growth=g)).implied_share_price - target_price
+    else:
+        terminal_roic_value = terminal_roic(wacc, roic_spread)
+
+        def price_gap(g: float) -> float:
+            schedule = [g / terminal_roic_value]
+            return run_dcf(
+                replace(base, revenue_growth=g, terminal_growth=g, reinvestment_rate=schedule)
+            ).implied_share_price - target_price
 
     bracket = (-0.99, wacc - 1e-6)
     return _solve_growth(price_gap, bracket, "perpetual breakeven growth")
@@ -193,22 +319,6 @@ def historical_margins_and_reinvestment(
         y: historical_reinvestment_rate(df.loc[y], df.loc[py], tax_rates[y]) for py, y in zip(years, years[1:])
     }
     return margins, reinvestment
-
-
-def historical_roic_by_year(financials_path: str | Path = DEFAULT_FINANCIALS) -> dict[str, float]:
-    """ROIC actually realized each fiscal year (years 2..N), from Gulf Oil's own financials.
-
-    Pairs with :func:`historical_margins_and_reinvestment`'s reinvestment
-    series: together they are the two factors of the fundamental growth
-    identity ``growth = reinvestment_rate x ROIC`` that Day 4 (V1) uses to
-    replace the fixed reinvestment rate. See
-    :func:`reverse_dcf.forward.historical_roic` for the beginning-of-year
-    invested-capital convention.
-    """
-    df = to_numeric(load_financials(financials_path)).set_index("fiscal_year")
-    years = list(df.index)
-    tax_rates = {y: effective_tax_rate(df.loc[y, "ebit"], df.loc[y, "interest_expense"], df.loc[y, "tax_expense"]) for y in years}
-    return {y: historical_roic(df.loc[y], df.loc[py], tax_rates[y]) for py, y in zip(years, years[1:])}
 
 
 def working_capital_release_years(financials_path: str | Path = DEFAULT_FINANCIALS) -> list[str]:
@@ -268,35 +378,92 @@ def grid_implied_growth(
 class ReverseDcfResult:
     ticker: str
     target_price: float
-    implied_growth: float
+    implied_growth: float | None
+    """``None`` when no growth rate reproduces ``target_price`` under V2's
+    model -- see ``price_reachable`` and ``max_achievable_price_10y``."""
     ebit_margin: float
-    reinvestment_rate: float
+    median_roic: float
+    terminal_roic: float
+    implied_reinvestment_year1: float | None
+    implied_reinvestment_terminal: float | None
     wacc: float
     terminal_growth: float
-    breakeven_growth: float
+    breakeven_growth: float | None
+    """``None`` when no perpetual growth rate reproduces ``target_price`` --
+    see ``breakeven_reachable`` and ``max_achievable_price_perpetual``."""
     forecast_years: int
+    price_reachable: bool
+    max_achievable_price_10y: float
+    growth_at_max_achievable_price_10y: float
+    breakeven_reachable: bool
+    max_achievable_price_perpetual: float
+    growth_at_max_achievable_price_perpetual: float
 
     def summary(self) -> str:
         lines = [
             f"Reverse DCF -- {self.ticker} at Rs{self.target_price:,.2f}/share",
             f"  Forecast horizon:                    {self.forecast_years} years",
             f"  EBIT margin (latest FY, held fixed): {self.ebit_margin:.2%}",
-            f"  Reinvestment rate (latest FY, fixed):{self.reinvestment_rate:.2%}",
-            f"  WACC:                                {self.wacc:.2%}",
-            f"  Terminal growth:                     {self.terminal_growth:.2%}",
-            f"  Implied revenue growth (10y CAGR):    {self.implied_growth:.2%}",
-            f"  Perpetual breakeven growth:           {self.breakeven_growth:.2%}",
+            f"  Historical median ROIC (V2 anchor):  {self.median_roic:.2%}",
+            f"  Terminal ROIC (WACC + stated spread):{self.terminal_roic:.2%}",
         ]
+        if self.price_reachable:
+            lines += [
+                f"  Implied reinvestment, year 1:        {self.implied_reinvestment_year1:.2%}",
+                f"  Implied reinvestment, year {self.forecast_years}:       {self.implied_reinvestment_terminal:.2%}",
+                f"  WACC:                                {self.wacc:.2%}",
+                f"  Terminal growth:                     {self.terminal_growth:.2%}",
+                f"  Implied revenue growth (10y CAGR):    {self.implied_growth:.2%}",
+            ]
+        else:
+            lines += [
+                f"  WACC:                                {self.wacc:.2%}",
+                f"  Terminal growth:                     {self.terminal_growth:.2%}",
+                "  Implied revenue growth (10y CAGR):    none -- no constant growth rate reproduces this price",
+                f"    (V2's ceiling: Rs{self.max_achievable_price_10y:,.2f}/share at "
+                f"{self.growth_at_max_achievable_price_10y:+.2%} growth, still short of the target)",
+            ]
+        if self.breakeven_reachable:
+            lines.append(f"  Perpetual breakeven growth:           {self.breakeven_growth:.2%}")
+        else:
+            lines.append(
+                "  Perpetual breakeven growth:           none -- ceiling is "
+                f"Rs{self.max_achievable_price_perpetual:,.2f}/share at "
+                f"{self.growth_at_max_achievable_price_perpetual:+.2%} growth"
+            )
         return "\n".join(lines) + "\n"
 
     def to_contract(self) -> dict:
-        """The ``valuation`` block this repo publishes to the spine (v0.7)."""
+        """The ``valuation`` block this repo publishes to the spine (v0.7, V2 keys added).
+
+        ``implied_cagr``, ``implied_ebit_margin``, ``implied_reinvestment``
+        and ``breakeven_growth`` are the original v0.7 keys, kept as-is
+        (``implied_reinvestment`` now means the *year 1* rate of V2's
+        schedule, not V1's single flat rate, but the key's shape --
+        one float, or ``null`` when unreachable -- is unchanged, so
+        STOCKSTALKER's gate, which only requires these four keys to be
+        present, reads it the same way it always has).
+        ``implied_reinvestment_terminal``, ``median_roic``, ``terminal_roic``,
+        ``price_reachable`` and the two ``max_achievable_price*``/
+        ``growth_at_max_achievable_price*`` pairs are new, additive keys --
+        same "new keys only, keep the shape" convention NEXT_STEPS.md's
+        Day 6 risk-contract row uses.
+        """
         return {
             "valuation": {
                 "implied_cagr": self.implied_growth,
                 "implied_ebit_margin": self.ebit_margin,
-                "implied_reinvestment": self.reinvestment_rate,
+                "implied_reinvestment": self.implied_reinvestment_year1,
                 "breakeven_growth": self.breakeven_growth,
+                "implied_reinvestment_terminal": self.implied_reinvestment_terminal,
+                "median_roic": self.median_roic,
+                "terminal_roic": self.terminal_roic,
+                "price_reachable": self.price_reachable,
+                "max_achievable_price_10y": self.max_achievable_price_10y,
+                "growth_at_max_achievable_price_10y": self.growth_at_max_achievable_price_10y,
+                "breakeven_reachable": self.breakeven_reachable,
+                "max_achievable_price_perpetual": self.max_achievable_price_perpetual,
+                "growth_at_max_achievable_price_perpetual": self.growth_at_max_achievable_price_perpetual,
             }
         }
 
@@ -308,23 +475,83 @@ def solve(
     ticker: str = "GULFOILLUB",
     forecast_years: int = 10,
     terminal_growth: float | None = None,
+    roic_spread: float = TERMINAL_ROIC_SPREAD_DEFAULT,
 ) -> ReverseDcfResult:
-    """Run the full Day 5 reverse solve: implied growth plus the perpetual breakeven, at the base-case margin/reinvestment."""
+    """Run the full Day 5 reverse solve: implied growth plus the perpetual breakeven, at the base-case margin and V2's growth/ROIC-derived reinvestment schedule.
+
+    V2 (CRITIQUES.md V1): fixing the growth/reinvestment identity means
+    price is no longer guaranteed to rise without limit as growth rises --
+    see :func:`reverse_dcf.forward.roic_fade_schedule`. For GULFOILLUB at
+    today's committed price, neither the 10-year nor the perpetual model
+    can actually reach it: both raise :class:`PriceUnreachableError`, caught
+    here rather than left to crash the CLI, and reported as
+    ``price_reachable=False``/``breakeven_reachable=False`` plus the
+    ceiling each model tops out at. That is itself the headline V2 result,
+    not a bug to engineer around (PLAN.md rule 5: honest results, including
+    when a fix makes a number worse).
+    """
     base = base_case_from_financials(
-        financials_path, revenue_growth=0.0, forecast_years=forecast_years, terminal_growth=terminal_growth
+        financials_path,
+        revenue_growth=0.0,
+        forecast_years=forecast_years,
+        terminal_growth=terminal_growth,
+        roic_spread=roic_spread,
     )
-    g = implied_growth(target_price, financials_path, forecast_years=forecast_years, terminal_growth=base.terminal_growth)
-    breakeven = perpetual_breakeven_growth(target_price, financials_path)
+    median_roic = historical_median_roic(financials_path)
+    terminal_roic_value = terminal_roic(base.wacc, roic_spread)
+    roic_schedule = roic_fade_schedule(median_roic, terminal_roic_value, forecast_years)
+
+    try:
+        g = implied_growth(
+            target_price,
+            financials_path,
+            forecast_years=forecast_years,
+            terminal_growth=base.terminal_growth,
+            roic_spread=roic_spread,
+        )
+        price_reachable = True
+        reinvestment_schedule = reinvestment_schedule_from_growth(g, roic_schedule)
+        max_price_10y, growth_at_max_10y = target_price, g
+        implied_reinvestment_year1, implied_reinvestment_terminal = (
+            reinvestment_schedule[0],
+            reinvestment_schedule[-1],
+        )
+    except PriceUnreachableError as exc:
+        g = None
+        price_reachable = False
+        max_price_10y = target_price + exc.best_price_gap
+        growth_at_max_10y = exc.best_growth
+        implied_reinvestment_year1 = implied_reinvestment_terminal = None
+
+    try:
+        breakeven = perpetual_breakeven_growth(target_price, financials_path, roic_spread=roic_spread)
+        breakeven_reachable = True
+        max_price_perpetual, growth_at_max_perpetual = target_price, breakeven
+    except PriceUnreachableError as exc:
+        breakeven = None
+        breakeven_reachable = False
+        max_price_perpetual = target_price + exc.best_price_gap
+        growth_at_max_perpetual = exc.best_growth
+
     return ReverseDcfResult(
         ticker=ticker,
         target_price=target_price,
         implied_growth=g,
         ebit_margin=base.ebit_margin,
-        reinvestment_rate=base.reinvestment_rate,
+        median_roic=median_roic,
+        terminal_roic=terminal_roic_value,
+        implied_reinvestment_year1=implied_reinvestment_year1,
+        implied_reinvestment_terminal=implied_reinvestment_terminal,
         wacc=base.wacc,
         terminal_growth=base.terminal_growth,
         breakeven_growth=breakeven,
         forecast_years=forecast_years,
+        price_reachable=price_reachable,
+        max_achievable_price_10y=max_price_10y,
+        growth_at_max_achievable_price_10y=growth_at_max_10y,
+        breakeven_reachable=breakeven_reachable,
+        max_achievable_price_perpetual=max_price_perpetual,
+        growth_at_max_achievable_price_perpetual=growth_at_max_perpetual,
     )
 
 

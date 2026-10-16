@@ -45,6 +45,7 @@ from reverse_dcf.forward import DEFAULT_FINANCIALS, base_case_from_financials
 from reverse_dcf.solve import (
     GROWTH_BRACKET,
     MARKET_FIXTURES,
+    PriceUnreachableError,
     historical_margins_and_reinvestment,
     implied_growth,
     load_market_price,
@@ -74,7 +75,14 @@ class SensitivityRow:
 
     @property
     def swing(self) -> float:
-        """Absolute range of implied growth this variable's shock produces - the tornado's sort key."""
+        """Absolute range of implied growth this variable's shock produces - the tornado's sort key.
+
+        ``NaN`` (never raised) when either end is unreachable under V2 --
+        see :func:`sensitivity_table`. Python's ``sort`` tolerates NaN
+        values (it just leaves their relative order among themselves
+        undefined), so an unreachable row doesn't crash the sort, only
+        ends up in an arbitrary position among other unreachable rows.
+        """
         return abs(self.high_growth - self.low_growth)
 
 
@@ -94,27 +102,43 @@ def sensitivity_table(
     margins, reinvestment = historical_margins_and_reinvestment(financials_path)
     margin_shock = statistics.pstdev(margins.values())
     reinvestment_shock = statistics.pstdev(reinvestment.values())
+    # V2 (CRITIQUES.md V1): base.reinvestment_rate is no longer a single
+    # historical fiscal-year rate -- at revenue_growth=0.0 it is an all-zero
+    # schedule (see base_case_from_financials), which isn't a meaningful
+    # sensitivity-row midpoint. This row still asks the same question it
+    # always did ("what if reinvestment deviated by +/-1 std from Gulf
+    # Oil's own historical range, instead of following the growth/ROIC
+    # model"), so its base_value is now the mean of that same historical
+    # series instead.
+    reinvestment_mean = statistics.mean(reinvestment.values())
 
     specs = [
         ("wacc", "WACC", base.wacc, WACC_SHOCK, "wacc"),
         ("terminal_growth", "Terminal growth", base.terminal_growth, TERMINAL_GROWTH_SHOCK, "terminal_growth"),
         ("ebit_margin", "EBIT margin", base.ebit_margin, margin_shock, "ebit_margin"),
-        ("reinvestment_rate", "Reinvestment rate", base.reinvestment_rate, reinvestment_shock, "reinvestment_rate"),
+        ("reinvestment_rate", "Reinvestment rate", reinvestment_mean, reinvestment_shock, "reinvestment_rate"),
     ]
+
+    def _implied_growth_or_nan(**override) -> float:
+        # V2 (CRITIQUES.md V1): a shocked assumption can itself make the
+        # target price unreachable (see reverse_dcf.forward.roic_fade_schedule
+        # and reverse_dcf.solve._solve_growth) -- same NaN-for-no-root
+        # convention reverse_dcf.solve.grid_implied_growth already uses for
+        # its own margin x reinvestment grid, not a new idiom.
+        try:
+            return implied_growth(target_price, financials_path, forecast_years=forecast_years, bracket=bracket, **override)
+        except PriceUnreachableError:
+            return float("nan")
 
     rows = []
     for variable, label, base_value, shock, override_kw in specs:
         low_value = base_value - shock
         high_value = base_value + shock
-        low_growth = implied_growth(
-            target_price, financials_path, forecast_years=forecast_years, bracket=bracket, **{override_kw: low_value}
-        )
-        high_growth = implied_growth(
-            target_price, financials_path, forecast_years=forecast_years, bracket=bracket, **{override_kw: high_value}
-        )
+        low_growth = _implied_growth_or_nan(**{override_kw: low_value})
+        high_growth = _implied_growth_or_nan(**{override_kw: high_value})
         rows.append(SensitivityRow(variable, label, base_value, low_value, high_value, low_growth, high_growth))
 
-    rows.sort(key=lambda r: r.swing, reverse=True)
+    rows.sort(key=lambda r: (pd.isna(r.swing), -0.0 if pd.isna(r.swing) else -r.swing))
     return rows
 
 
@@ -152,6 +176,14 @@ def plot_tornado(rows: list[SensitivityRow], ticker: str, target_price: float, o
     each variable - colored by which end is which, not by the bar's screen
     position - and are drawn in the order :func:`sensitivity_table` returns,
     largest swing at the top.
+
+    V2 (CRITIQUES.md V1): ``low_growth``/``high_growth`` can be NaN (one end,
+    or both) when that shocked assumption makes the target price
+    unreachable (see :func:`sensitivity_table`) -- a row with one finite end
+    draws a short marker at that end labelled "other end unreachable"
+    rather than a bar with an undefined width; a row with both ends NaN
+    draws no mark at all, just the "both ends unreachable" label, and is
+    left out of the axis-range calculation either way.
     """
     fig, ax = plt.subplots(figsize=(9, 4.5), facecolor="#fcfcfb")
     ax.set_facecolor("#fcfcfb")
@@ -159,27 +191,43 @@ def plot_tornado(rows: list[SensitivityRow], ticker: str, target_price: float, o
     labels = [r.label for r in rows]
     y_pos = range(len(rows))[::-1]  # largest swing at the top
 
-    growth_lo = min(min(r.low_growth, r.high_growth) for r in rows)
-    growth_hi = max(max(r.low_growth, r.high_growth) for r in rows)
+    finite_values = [v for r in rows for v in (r.low_growth, r.high_growth) if pd.notna(v)]
+    growth_lo = min(finite_values)
+    growth_hi = max(finite_values)
     span = growth_hi - growth_lo
     pad = span * 0.22  # room for the value labels beyond each bar end
     ax.set_xlim(growth_lo - pad, growth_hi + pad)
+    label_gap = span * 0.015
 
     for y, r in zip(y_pos, rows):
-        lo, hi = sorted((r.low_growth, r.high_growth))
-        low_is_low_value = r.low_growth <= r.high_growth
-        ax.barh(
-            y,
-            hi - lo,
-            left=lo,
-            height=0.55,
-            color=UP_COLOR if low_is_low_value else DOWN_COLOR,
-            edgecolor="#fcfcfb",
-            linewidth=2,
-        )
-        label_gap = span * 0.015
-        ax.text(lo - label_gap, y, f"{r.low_value:.1%}", ha="right", va="center", fontsize=8, color=MUTED)
-        ax.text(hi + label_gap, y, f"{r.high_value:.1%}", ha="left", va="center", fontsize=8, color=MUTED)
+        low_finite, high_finite = pd.notna(r.low_growth), pd.notna(r.high_growth)
+        if low_finite and high_finite:
+            lo, hi = sorted((r.low_growth, r.high_growth))
+            low_is_low_value = r.low_growth <= r.high_growth
+            ax.barh(
+                y,
+                hi - lo,
+                left=lo,
+                height=0.55,
+                color=UP_COLOR if low_is_low_value else DOWN_COLOR,
+                edgecolor="#fcfcfb",
+                linewidth=2,
+            )
+            ax.text(lo - label_gap, y, f"{r.low_value:.1%}", ha="right", va="center", fontsize=8, color=MUTED)
+            ax.text(hi + label_gap, y, f"{r.high_value:.1%}", ha="left", va="center", fontsize=8, color=MUTED)
+        elif low_finite or high_finite:
+            finite_g = r.low_growth if low_finite else r.high_growth
+            finite_value = r.low_value if low_finite else r.high_value
+            ax.scatter([finite_g], [y], color=UP_COLOR, s=28, zorder=3)
+            ax.text(
+                finite_g + label_gap, y, f"{finite_value:.1%} (other end unreachable under V2)",
+                ha="left", va="center", fontsize=8, color=MUTED,
+            )
+        else:
+            ax.text(
+                growth_lo, y, "unreachable at either shock value under V2",
+                ha="left", va="center", fontsize=8, color=MUTED, style="italic",
+            )
 
     ax.set_yticks(list(y_pos))
     ax.set_yticklabels(labels, color=INK, fontsize=10)

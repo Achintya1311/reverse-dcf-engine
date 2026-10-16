@@ -1,10 +1,22 @@
+import math
+import statistics
 from dataclasses import replace
 
 import pytest
 
 from reverse_dcf.forward import DEFAULT_FINANCIALS, base_case_from_financials, run_dcf
-from reverse_dcf.solve import MARKET_FIXTURES, implied_growth, load_market_price
+from reverse_dcf.solve import MARKET_FIXTURES, historical_margins_and_reinvestment, implied_growth, load_market_price
 from reverse_dcf.sensitivity import plot_tornado, sensitivity_table, to_frame
+
+# V2 (CRITIQUES.md V1): the real market price's own base case is unreachable
+# under V2 (see tests/test_solve.py), and shocking WACC/terminal
+# growth/EBIT margin by a small amount around an already-unreachable base
+# case stays unreachable at one or both ends most of the time (see
+# tests/test_sensitivity.py::test_sensitivity_table_reports_the_real_market_price_as_mostly_unreachable
+# below for that actual, reportable finding). Tests that check the
+# round-trip/ordering *mechanics* instead use a price reachable at both
+# shock ends of all four variables, picked by probing.
+REACHABLE_PRICE = 700.0
 
 
 def test_sensitivity_table_covers_all_four_fixed_assumptions():
@@ -22,35 +34,61 @@ def test_sensitivity_table_is_sorted_by_swing_descending():
 
 def test_sensitivity_rows_are_centered_on_the_actual_base_case():
     # base_value must be the same latest-fiscal-year actual the Day 5 solver
-    # itself uses, not an arbitrary sensitivity-only number.
+    # itself uses, not an arbitrary sensitivity-only number -- except
+    # reinvestment_rate, whose V2 base_value is the historical mean (see
+    # sensitivity.py's own note: base.reinvestment_rate at revenue_growth=0.0
+    # is V2's all-zero schedule, not a meaningful sensitivity midpoint).
     market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
     base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=0.0)
+    _, reinvestment = historical_margins_and_reinvestment(DEFAULT_FINANCIALS)
+    reinvestment_mean = statistics.mean(reinvestment.values())
     rows = sensitivity_table(market.price, DEFAULT_FINANCIALS)
     by_variable = {r.variable: r for r in rows}
     assert by_variable["wacc"].base_value == base.wacc
     assert by_variable["terminal_growth"].base_value == base.terminal_growth
     assert by_variable["ebit_margin"].base_value == base.ebit_margin
-    assert by_variable["reinvestment_rate"].base_value == base.reinvestment_rate
+    assert by_variable["reinvestment_rate"].base_value == pytest.approx(reinvestment_mean)
     for r in rows:
         assert r.low_value < r.base_value < r.high_value
+
+
+def test_sensitivity_table_reports_the_real_market_price_as_mostly_unreachable():
+    # The actual Day 4 finding carried through to the tornado: shocking
+    # WACC, terminal growth or EBIT margin by a small amount around an
+    # already-unreachable base case (see tests/test_solve.py) stays
+    # unreachable at the end that would have needed *even more* growth --
+    # reported as NaN, not a crash. reinvestment_rate is the one row still
+    # fully reachable, because it uses a flat V1-style override (see
+    # sensitivity.py's _implied_growth_or_nan / implied_growth's
+    # reinvestment_rate escape hatch), which stays monotonic in growth the
+    # way V1's whole model always was.
+    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
+    rows = sensitivity_table(market.price, DEFAULT_FINANCIALS)
+    by_variable = {r.variable: r for r in rows}
+    assert not math.isnan(by_variable["reinvestment_rate"].low_growth)
+    assert not math.isnan(by_variable["reinvestment_rate"].high_growth)
+    for variable in ("wacc", "terminal_growth", "ebit_margin"):
+        row = by_variable[variable]
+        assert math.isnan(row.low_growth) or math.isnan(row.high_growth)
 
 
 def test_sensitivity_rows_round_trip_through_the_forward_engine():
     # Same "Done when" gate as Day 5: each shocked growth number, fed back
     # through the forward engine at that same shocked assumption, must
     # reproduce the target price - otherwise a bar end is unfalsifiable.
-    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
-    rows = sensitivity_table(market.price, DEFAULT_FINANCIALS)
+    rows = sensitivity_table(REACHABLE_PRICE, DEFAULT_FINANCIALS)
     for r in rows:
         if r.variable == "terminal_growth":
             base = base_case_from_financials(
                 DEFAULT_FINANCIALS, revenue_growth=r.low_growth, terminal_growth=r.low_value
             )
+        elif r.variable == "wacc":
+            base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=r.low_growth, wacc=r.low_value)
         else:
             base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=r.low_growth)
             base = replace(base, **{r.variable: r.low_value})
         result = run_dcf(base)
-        assert result.implied_share_price == pytest.approx(market.price, abs=0.01)
+        assert result.implied_share_price == pytest.approx(REACHABLE_PRICE, abs=0.01)
 
 
 def test_reinvestment_rate_swings_the_implied_growth_the_most():
@@ -65,8 +103,7 @@ def test_reinvestment_rate_swings_the_implied_growth_the_most():
 def test_higher_wacc_requires_higher_implied_growth():
     # A higher discount rate shrinks the present value of a given growth
     # path, so reproducing the same price needs *more* growth, not less.
-    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
-    rows = sensitivity_table(market.price, DEFAULT_FINANCIALS)
+    rows = sensitivity_table(REACHABLE_PRICE, DEFAULT_FINANCIALS)
     wacc_row = next(r for r in rows if r.variable == "wacc")
     assert wacc_row.high_growth > wacc_row.low_growth
 
@@ -77,17 +114,27 @@ def test_to_frame_has_one_row_per_variable_and_matches_the_dataclass_rows():
     frame = to_frame(rows)
     assert len(frame) == 4
     assert list(frame["variable"]) == [r.variable for r in rows]
-    assert list(frame["swing"]) == [r.swing for r in rows]
+    # NaN != NaN under plain equality (some rows are unreachable at the real
+    # market price - see test_sensitivity_table_reports_the_real_market_price_as_mostly_unreachable),
+    # so compare with NaN-aware equality rather than a bare list comparison.
+    assert frame["swing"].tolist() == pytest.approx([r.swing for r in rows], nan_ok=True)
 
 
 def test_implied_growth_wacc_override_matches_a_manual_replace():
-    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
+    # V2 (CRITIQUES.md V1): wacc is a first-class base_case_from_financials
+    # parameter precisely so overriding it also moves the ROIC-fade
+    # schedule's terminal anchor consistently - a post-hoc
+    # dataclasses.replace(base, wacc=...) on a V2 base built at the
+    # *unshocked* wacc would carry a reinvestment schedule computed against
+    # the wrong wacc, so the manual reconstruction must pass the shocked
+    # wacc into base_case_from_financials itself, not bolt it on after.
     base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=0.0)
     shocked_wacc = base.wacc + 0.01
 
-    g = implied_growth(market.price, DEFAULT_FINANCIALS, wacc=shocked_wacc)
-    result = run_dcf(replace(base, wacc=shocked_wacc, revenue_growth=g))
-    assert result.implied_share_price == pytest.approx(market.price, abs=0.01)
+    g = implied_growth(REACHABLE_PRICE, DEFAULT_FINANCIALS, wacc=shocked_wacc)
+    shocked_base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=g, wacc=shocked_wacc)
+    result = run_dcf(shocked_base)
+    assert result.implied_share_price == pytest.approx(REACHABLE_PRICE, abs=0.01)
 
 
 def test_plot_tornado_writes_a_nonempty_png(tmp_path):

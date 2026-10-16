@@ -85,8 +85,15 @@ def test_comparison_table_implied_growth_matches_day_5_solve():
     table = comparison_table(market.price, DEFAULT_FINANCIALS, DEFAULT_PEERS)
     result = solve(market.price, DEFAULT_FINANCIALS, ticker="GULFOILLUB")
 
+    # V2 (CRITIQUES.md V1): the real market price is genuinely unreachable
+    # under V2's model (see tests/test_solve.py), so both sides are the
+    # table's NaN placeholder, not a growth figure to compare numerically.
+    assert result.price_reachable is False
     implied_row = table[table["kind"] == "implied - 10yr (Day 5)"].iloc[0]
-    assert implied_row["revenue_cagr"] == pytest.approx(result.implied_growth)
+    import math
+
+    assert math.isnan(implied_row["revenue_cagr"])
+    assert "UNREACHABLE" in implied_row["note"]
 
 
 def test_comparison_table_own_realized_history_beats_every_peer():

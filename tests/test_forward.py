@@ -177,18 +177,21 @@ def test_zero_growth_is_always_consistent_regardless_of_reinvestment_sign():
     check_growth_reinvestment_consistency(0.0, -0.1568)
 
 
-def test_base_case_reinvestment_is_inconsistent_with_positive_forecast_growth():
-    # V1 (Day 3-4): base_case_from_financials pins reinvestment_rate to
-    # FY2023-24's actual, a working-capital release year with a negative
-    # rate (-15.68%). Pairing that fixed negative rate with any positive
-    # forecast growth, as every solve.py caller already does, violates
-    # growth = reinvestment_rate x ROIC -- there is no real ROIC that
-    # produces positive growth from negative reinvestment. This is expected
-    # to fail until Day 4 replaces the fixed reinvestment rate with
-    # growth / ROIC (reinvestment re-derived from the growth being forecast,
-    # not pinned to one historical year regardless of sign).
+def test_base_case_reinvestment_is_now_consistent_with_positive_forecast_growth():
+    # V1 (Day 3-4) pinned reinvestment_rate to FY2023-24's actual, a
+    # working-capital release year with a negative rate (-15.68%), pairing
+    # it with any positive forecast growth regardless of sign -- the bug
+    # this test used to prove by failing (no pytest.raises; it genuinely
+    # errored, by design, until this fix landed). V2 (Day 4) replaces that
+    # fixed rate with a per-year schedule built from growth / ROIC
+    # (:func:`reinvestment_schedule_from_growth`), which satisfies the
+    # growth=reinvestment_rate x ROIC identity by construction for every
+    # year -- so every year of the schedule now passes the exact same
+    # consistency check that used to fail on V1's single flat rate.
     base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=0.10)
-    check_growth_reinvestment_consistency(base.revenue_growth, base.reinvestment_rate)
+    assert isinstance(base.reinvestment_rate, list)
+    for rate in base.reinvestment_rate:
+        check_growth_reinvestment_consistency(base.revenue_growth, rate)
 
 
 def test_base_case_from_financials_uses_days_2_and_3_outputs_not_new_numbers():

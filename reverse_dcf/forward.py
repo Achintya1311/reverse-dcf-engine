@@ -22,7 +22,11 @@ Method, one line each:
   standard reinvestment-rate formulation (Damodaran): reinvestment_rate is
   ``(capex - D&A + change in NWC) / NOPAT``, so the one rate absorbs capex,
   depreciation and working-capital movement instead of forecasting each
-  separately -- see :func:`historical_reinvestment_rate`.
+  separately -- see :func:`historical_reinvestment_rate` (the historical,
+  one-fiscal-year read of it) and :func:`reinvestment_schedule_from_growth`
+  (V2's default: a per-year rate re-derived from whatever growth is being
+  forecast, via ``growth = reinvestment_rate x ROIC``, instead of one
+  historical year's rate held fixed regardless of growth -- CRITIQUES.md V1).
 - **Terminal value** is the Gordon growth formula on the first
   post-forecast FCFF, discounted back at the same WACC used for the
   explicit period. Requires ``wacc > terminal_growth``; that is not a
@@ -35,6 +39,7 @@ Method, one line each:
 from __future__ import annotations
 
 import argparse
+import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,9 +72,28 @@ def fcff_from_revenue(revenue: float, ebit_margin: float, tax_rate: float, reinv
     return nopat * (1 - reinvestment_rate)
 
 
-def project_fcff(revenues: list[float], ebit_margin: float, tax_rate: float, reinvestment_rate: float) -> list[float]:
-    """FCFF for each year in ``revenues``, same margin/tax/reinvestment assumptions throughout."""
-    return [fcff_from_revenue(r, ebit_margin, tax_rate, reinvestment_rate) for r in revenues]
+def project_fcff(
+    revenues: list[float], ebit_margin: float, tax_rate: float, reinvestment_rate: float | list[float]
+) -> list[float]:
+    """FCFF for each year in ``revenues``, same margin/tax assumptions throughout.
+
+    ``reinvestment_rate`` is either one rate applied to every year (the V1
+    shape, still used by every override path in :mod:`reverse_dcf.solve` --
+    the historical margin x reinvestment grid, the sensitivity tornado's flat
+    shocks) or a list with one rate per year (V2's growth/ROIC-derived
+    schedule, see :func:`reinvestment_schedule_from_growth`). Both shapes
+    reach the same per-year formula; only how the rate is produced differs.
+    """
+    if isinstance(reinvestment_rate, (list, tuple)):
+        if len(reinvestment_rate) != len(revenues):
+            raise ValueError(
+                f"reinvestment_rate has {len(reinvestment_rate)} entries but there are "
+                f"{len(revenues)} forecast years"
+            )
+        rates = reinvestment_rate
+    else:
+        rates = [reinvestment_rate] * len(revenues)
+    return [fcff_from_revenue(r, ebit_margin, tax_rate, rate) for r, rate in zip(revenues, rates)]
 
 
 def present_value(cashflows: list[float], wacc: float) -> float:
@@ -146,6 +170,98 @@ def historical_roic(df_row: "pd.Series", prior_row: "pd.Series", tax_rate: float
     return nopat / invested_capital(prior_row)
 
 
+def historical_roic_by_year(financials_path: str | Path = DEFAULT_FINANCIALS) -> dict[str, float]:
+    """ROIC actually realized each fiscal year (years 2..N), from the committed financials.
+
+    Moved here from :mod:`reverse_dcf.solve` (which still re-exports it by
+    import, since ``tests/test_solve.py`` imports it from there) because V2's
+    :func:`base_case_from_financials` now needs its median
+    (:func:`historical_median_roic`) to build the base case, and this is the
+    one place that already reads the financials CSV to call
+    :func:`historical_roic` per year -- computing the same per-year series a
+    second, independent way in two modules is exactly the kind of duplicated
+    derivation that drifts the two apart.
+    """
+    df = to_numeric(load_financials(financials_path)).set_index("fiscal_year")
+    years = list(df.index)
+    tax_rates = {
+        y: effective_tax_rate(df.loc[y, "ebit"], df.loc[y, "interest_expense"], df.loc[y, "tax_expense"])
+        for y in years
+    }
+    return {y: historical_roic(df.loc[y], df.loc[py], tax_rates[y]) for py, y in zip(years, years[1:])}
+
+
+def historical_median_roic(financials_path: str | Path = DEFAULT_FINANCIALS) -> float:
+    """Median of :func:`historical_roic_by_year`'s per-fiscal-year series.
+
+    V2's anchor for the *start* of the ROIC-fade schedule
+    (:func:`roic_fade_schedule`): the business's own typical realized return
+    on capital, not one single (possibly unusual) fiscal year -- the exact
+    problem V1 had with reinvestment rate, now avoided for ROIC too.
+    """
+    return statistics.median(historical_roic_by_year(financials_path).values())
+
+
+TERMINAL_ROIC_SPREAD_DEFAULT = 0.0
+"""V2's default spread of terminal-year ROIC over WACC: zero, not a company
+read. The generic competitive-equilibrium assumption textbook corporate
+finance uses for a terminal year (NISM XV ch.10/12's own convention): once
+the explicit high-growth window ends, no firm earns an excess return over
+its cost of capital forever, because competition erodes any advantage given
+enough time. A nonzero spread would be a claim that this specific company
+keeps a durable moat forever -- that is a view on the business, which this
+routine does not write (PLAN.md rule 4: judgement stays with Achintya).
+Callers may still override it, but the shipped default is not a prediction
+about Gulf Oil."""
+
+
+def terminal_roic(wacc: float, spread: float = TERMINAL_ROIC_SPREAD_DEFAULT) -> float:
+    """ROIC assumed at the end of the explicit forecast: ``wacc + spread``. See :data:`TERMINAL_ROIC_SPREAD_DEFAULT`."""
+    return wacc + spread
+
+
+def roic_fade_schedule(median_roic: float, terminal_roic_value: float, forecast_years: int) -> list[float]:
+    """ROIC for each explicit forecast year, fading linearly from ``median_roic`` (year 1) to
+    ``terminal_roic_value`` (the last explicit year).
+
+    V1 held the whole ten-year reinvestment rate fixed at one historical
+    fiscal year's actual. V2 instead lets the *efficiency* of that
+    reinvestment (ROIC) decay over the explicit window from what the
+    business has typically earned on capital toward the terminal
+    assumption, while the growth rate itself stays the single constant
+    ``revenue_growth`` the forward engine already models -- see
+    :func:`reinvestment_schedule_from_growth` for how growth and this
+    schedule combine into a reinvestment rate per year.
+
+    ``forecast_years == 1`` has no fade length (a single year is both the
+    first and the last), and that single year is exactly
+    :func:`perpetual_breakeven_growth`'s "already in the terminal state"
+    scenario, so it returns ``[terminal_roic_value]`` rather than
+    ``[median_roic]``.
+    """
+    if forecast_years < 1:
+        raise ValueError("forecast_years must be at least 1")
+    if forecast_years == 1:
+        return [terminal_roic_value]
+    step = (terminal_roic_value - median_roic) / (forecast_years - 1)
+    return [median_roic + step * t for t in range(forecast_years)]
+
+
+def reinvestment_schedule_from_growth(revenue_growth: float, roic_schedule: list[float]) -> list[float]:
+    """Reinvestment rate per year: ``revenue_growth / roic`` for each year's ROIC in ``roic_schedule``.
+
+    This *is* the fundamental growth identity
+    (:func:`check_growth_reinvestment_consistency`'s ``growth = reinvestment_rate
+    x ROIC``) solved for the reinvestment rate instead of asserted
+    afterward -- so a schedule built this way satisfies that identity by
+    construction, for every year, rather than needing to be checked against
+    it. ``revenue_growth == 0`` always gives an all-zero schedule: a
+    non-growing business needs no net new investment beyond maintenance
+    capex, which the model already treats as embedded in depreciation.
+    """
+    return [revenue_growth / roic for roic in roic_schedule]
+
+
 def check_growth_reinvestment_consistency(
     revenue_growth: float,
     reinvestment_rate: float,
@@ -196,7 +312,9 @@ class DcfAssumptions:
     revenue_growth: float
     ebit_margin: float
     tax_rate: float
-    reinvestment_rate: float
+    reinvestment_rate: float | list[float]
+    """A single rate for every forecast year (V1 and every override path), or
+    one rate per year (V2's default -- see :func:`reinvestment_schedule_from_growth`)."""
     wacc: float
     terminal_growth: float
     forecast_years: int
@@ -217,12 +335,19 @@ class DcfResult:
 
     def summary(self) -> str:
         a = self.assumptions
+        if isinstance(a.reinvestment_rate, (list, tuple)):
+            reinvestment_line = (
+                f"  Reinvestment rate (yr 1 -> yr {a.forecast_years}):     "
+                f"{a.reinvestment_rate[0]:.2%} -> {a.reinvestment_rate[-1]:.2%}"
+            )
+        else:
+            reinvestment_line = f"  Reinvestment rate:                  {a.reinvestment_rate:.2%}"
         lines = [
             f"Forward FCFF DCF -- {a.forecast_years}-year forecast",
             f"  Revenue growth (explicit period):   {a.revenue_growth:.2%}",
             f"  EBIT margin:                        {a.ebit_margin:.2%}",
             f"  Tax rate:                           {a.tax_rate:.2%}",
-            f"  Reinvestment rate:                  {a.reinvestment_rate:.2%}",
+            reinvestment_line,
             f"  WACC:                               {a.wacc:.2%}",
             f"  Terminal growth:                    {a.terminal_growth:.2%}",
             f"  PV of explicit-period FCFF:          {self.pv_explicit_fcff:,.2f}",
@@ -267,32 +392,53 @@ def base_case_from_financials(
     revenue_growth: float,
     forecast_years: int = 10,
     terminal_growth: float | None = None,
+    wacc: float | None = None,
+    roic_spread: float = TERMINAL_ROIC_SPREAD_DEFAULT,
 ) -> DcfAssumptions:
     """Build a :class:`DcfAssumptions` off the latest fiscal year's actuals and Day 3's WACC.
 
     Only ``revenue_growth`` has no sensible default -- it is the number
     Day 5's solver exists to find, so this function refuses to guess one.
-    Every other assumption is read from data: EBIT margin, tax rate and
-    reinvestment rate from the latest fiscal year in ``financials_path``,
-    WACC from :func:`reverse_dcf.wacc.compute_wacc`, and terminal growth
-    defaults to the same risk-free rate WACC uses, on Damodaran's own
-    convention that a perpetual growth rate should not exceed the economy's
-    long-run (proxied by the risk-free) growth rate.
+    EBIT margin and tax rate are read from the latest fiscal year in
+    ``financials_path``; WACC from :func:`reverse_dcf.wacc.compute_wacc`
+    unless ``wacc`` overrides it; terminal growth defaults to the same
+    risk-free rate WACC uses, on Damodaran's own convention that a perpetual
+    growth rate should not exceed the economy's long-run (proxied by the
+    risk-free) growth rate.
+
+    V2 (CRITIQUES.md V1): ``reinvestment_rate`` is no longer one historical
+    fiscal year's actual rate held fixed regardless of the growth being
+    forecast (V1's bug -- see
+    :func:`check_growth_reinvestment_consistency`). It is now derived from
+    ``revenue_growth`` itself via the fundamental growth identity, using a
+    ROIC that fades from the business's own historical median
+    (:func:`historical_median_roic`) toward ``wacc + roic_spread`` by the
+    last explicit forecast year (:func:`roic_fade_schedule`,
+    :func:`reinvestment_schedule_from_growth`) -- consistent by
+    construction for any ``revenue_growth``, including 0 (an all-zero
+    schedule: no net new investment needed without growth). ``wacc`` is a
+    first-class parameter (not just a post-hoc ``dataclasses.replace``)
+    specifically so that overriding it also moves this schedule's terminal
+    anchor consistently, the way :mod:`reverse_dcf.sensitivity`'s WACC shock
+    needs it to.
     """
     df = to_numeric(load_financials(financials_path)).set_index("fiscal_year")
     years = list(df.index)
     if len(years) < 2:
         raise ValueError("need at least two fiscal years to derive a reinvestment rate")
     current = df.loc[years[-1]]
-    prior = df.loc[years[-2]]
 
     tax_rate = effective_tax_rate(current["ebit"], current["interest_expense"], current["tax_expense"])
     ebit_margin = current["ebit"] / current["revenue"]
-    reinvestment_rate = historical_reinvestment_rate(current, prior, tax_rate)
 
     wacc_result = compute_wacc(financials_path, fiscal_year=years[-1])
+    effective_wacc = wacc_result.wacc if wacc is None else wacc
     if terminal_growth is None:
         terminal_growth = load_risk_free_rate()
+
+    median_roic = historical_median_roic(financials_path)
+    roic_schedule = roic_fade_schedule(median_roic, terminal_roic(effective_wacc, roic_spread), forecast_years)
+    reinvestment_rate = reinvestment_schedule_from_growth(revenue_growth, roic_schedule)
 
     net_debt_lakh = current["total_debt"] - current["cash_and_equivalents"]
     return DcfAssumptions(
@@ -301,7 +447,7 @@ def base_case_from_financials(
         ebit_margin=ebit_margin,
         tax_rate=tax_rate,
         reinvestment_rate=reinvestment_rate,
-        wacc=wacc_result.wacc,
+        wacc=effective_wacc,
         terminal_growth=terminal_growth,
         forecast_years=forecast_years,
         net_debt=net_debt_lakh * LAKH_TO_RUPEES,
@@ -330,7 +476,8 @@ def main() -> None:
         "--reinvestment-rate",
         type=float,
         default=None,
-        help="reinvestment rate override; defaults to the latest fiscal year's implied rate",
+        help="flat reinvestment rate override, applied to every forecast year; "
+        "defaults to V2's growth/ROIC-derived per-year schedule (see base_case_from_financials)",
     )
     args = parser.parse_args()
 

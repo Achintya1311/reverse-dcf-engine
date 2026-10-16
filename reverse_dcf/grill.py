@@ -39,7 +39,7 @@ import argparse
 
 from reverse_dcf.compare import historical_revenue_cagr
 from reverse_dcf.forward import DEFAULT_FINANCIALS
-from reverse_dcf.solve import implied_growth, load_market_price
+from reverse_dcf.solve import PriceUnreachableError, implied_growth, load_market_price
 
 
 def base_year_robustness_check(financials_path=DEFAULT_FINANCIALS) -> dict:
@@ -66,14 +66,30 @@ def horizon_sensitivity(
     financials_path=DEFAULT_FINANCIALS,
     *,
     horizons: tuple[int, ...] = DEFAULT_HORIZONS,
-) -> dict[int, float]:
+) -> dict[int, float | None]:
     """10-year-equivalent implied growth at each forecast horizon in ``horizons``.
 
     Every other assumption stays at :func:`reverse_dcf.forward.base_case_from_financials`'s
     defaults (Day 5's base case), same as the headline ``forecast_years=10`` run - only
     the horizon changes.
+
+    V2 (CRITIQUES.md V1): a horizon's value is ``None`` when
+    :func:`reverse_dcf.solve.implied_growth` raises
+    :class:`reverse_dcf.solve.PriceUnreachableError` at that horizon -- no
+    longer a hypothetical, since V2 fixing the growth/reinvestment identity
+    means longer horizons (more years paying V2's reinvestment cost for the
+    same growth) can themselves push the target price out of reach even
+    when a shorter horizon still reaches it. That horizon-dependence is
+    itself part of what this check exists to surface, not a reason to hide
+    the horizon behind a crash.
     """
-    return {years: implied_growth(target_price, financials_path, forecast_years=years) for years in horizons}
+    result = {}
+    for years in horizons:
+        try:
+            result[years] = implied_growth(target_price, financials_path, forecast_years=years)
+        except PriceUnreachableError:
+            result[years] = None
+    return result
 
 
 def main() -> None:
@@ -97,7 +113,8 @@ def main() -> None:
     print("2. Forecast-horizon robustness (Day 5's solver at horizons other than the default 10y):")
     for years, g in horizon_sensitivity(price, args.financials).items():
         marker = " <- base case" if years == 10 else ""
-        print(f"   {years:>2}y horizon: implied growth {g:+.2%}{marker}")
+        value = f"{g:+.2%}" if g is not None else "unreachable (V2: no growth rate reproduces this price at this horizon)"
+        print(f"   {years:>2}y horizon: implied growth {value}{marker}")
 
 
 if __name__ == "__main__":

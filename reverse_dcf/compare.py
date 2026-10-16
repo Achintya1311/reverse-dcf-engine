@@ -85,18 +85,34 @@ def comparison_table(
     result = solve(target_price, financials_path, ticker=ticker)
     own_realized = historical_revenue_cagr(financials_path)
 
+    if result.price_reachable:
+        implied_note = f"market-implied at Rs{target_price:,.2f}/share"
+    else:
+        implied_note = (
+            f"UNREACHABLE under V2 at Rs{target_price:,.2f}/share -- no constant growth rate "
+            f"reproduces it (ceiling Rs{result.max_achievable_price_10y:,.2f} at "
+            f"{result.growth_at_max_achievable_price_10y:+.2%} growth); see CRITIQUES.md V1/V2"
+        )
+    if result.breakeven_reachable:
+        breakeven_note = "same price, growth held forever, no deceleration"
+    else:
+        breakeven_note = (
+            f"UNREACHABLE under V2 -- ceiling Rs{result.max_achievable_price_perpetual:,.2f} at "
+            f"{result.growth_at_max_achievable_price_perpetual:+.2%} growth"
+        )
+
     rows = [
         {
             "entity": ticker,
             "kind": "implied - 10yr (Day 5)",
-            "revenue_cagr": result.implied_growth,
-            "note": f"market-implied at Rs{target_price:,.2f}/share",
+            "revenue_cagr": result.implied_growth if result.price_reachable else float("nan"),
+            "note": implied_note,
         },
         {
             "entity": ticker,
             "kind": "implied - perpetual breakeven (Day 5)",
-            "revenue_cagr": result.breakeven_growth,
-            "note": "same price, growth held forever, no deceleration",
+            "revenue_cagr": result.breakeven_growth if result.breakeven_reachable else float("nan"),
+            "note": breakeven_note,
         },
         {
             "entity": ticker,
@@ -136,7 +152,7 @@ def comparison_table(
 
 def format_table(table: pd.DataFrame) -> str:
     printable = table.copy()
-    printable["revenue_cagr"] = printable["revenue_cagr"].map(lambda x: f"{x:.2%}")
+    printable["revenue_cagr"] = printable["revenue_cagr"].map(lambda x: f"{x:.2%}" if pd.notna(x) else "unreachable")
     return printable.to_string(index=False)
 
 
