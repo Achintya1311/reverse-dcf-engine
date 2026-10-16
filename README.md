@@ -1,5 +1,7 @@
 # Reverse DCF engine
 
+Educational research on historical data. Not investment advice. Not a SEBI-registered research analyst.
+
 Takes a share price as given and solves for the growth, margin and reinvestment the market must already believe — then asks whether those assumptions are plausible.
 
 **Status:** v1 complete (Sep 2026). Next: v2 replaces the fixed negative reinvestment rate with reinvestment = growth ÷ ROIC. Part of a nine-repo equity research pipeline; [STOCKSTALKER](https://github.com/Achintya1311/STOCKSTALKER) is the front door.
