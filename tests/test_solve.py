@@ -8,10 +8,12 @@ from reverse_dcf.solve import (
     MARKET_FIXTURES,
     grid_implied_growth,
     historical_margins_and_reinvestment,
+    historical_roic_by_year,
     implied_growth,
     load_market_price,
     perpetual_breakeven_growth,
     solve,
+    working_capital_release_years,
 )
 
 
@@ -76,6 +78,30 @@ def test_historical_margins_and_reinvestment_cover_the_ten_fiscal_years():
     assert len(margins) == 10
     assert len(reinvestment) == 9  # first year has no prior year to diff against
     assert all(0 < m < 1 for m in margins.values())
+
+
+def test_historical_roic_by_year_covers_nine_fiscal_years():
+    roic = historical_roic_by_year(DEFAULT_FINANCIALS)
+    assert len(roic) == 9  # first year has no prior year to use as invested capital
+    assert "FY2023-24" in roic
+
+
+def test_historical_roic_by_year_matches_hand_computed_latest_fiscal_year():
+    # NOPAT(FY24) = ebit(43906.45) * (1 - tax_rate); tax_rate = tax_expense /
+    # (ebit - interest_expense) = 10535.66 / (43906.45 - 2560.94).
+    # invested_capital(FY23) = total_assets(207157.15) - cash(65036.0).
+    roic = historical_roic_by_year(DEFAULT_FINANCIALS)
+    tax_rate = 10535.66 / (43906.45 - 2560.94)
+    nopat = 43906.45 * (1 - tax_rate)
+    expected = nopat / (207157.15 - 65036.0)
+    assert roic["FY2023-24"] == pytest.approx(expected)
+
+
+def test_working_capital_release_years_includes_the_latest_fiscal_year():
+    # V1: FY2023-24's net working capital fell from 50111.89 to 47469.15.
+    release_years = working_capital_release_years(DEFAULT_FINANCIALS)
+    assert "FY2023-24" in release_years
+    assert len(release_years) < 9  # not every year is a release year
 
 
 def test_grid_implied_growth_shape_and_round_trip_on_one_cell():

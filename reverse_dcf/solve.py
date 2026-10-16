@@ -50,6 +50,8 @@ from reverse_dcf.forward import (
     DEFAULT_FINANCIALS,
     base_case_from_financials,
     historical_reinvestment_rate,
+    historical_roic,
+    is_working_capital_release_year,
     run_dcf,
 )
 from reverse_dcf.wacc import effective_tax_rate
@@ -191,6 +193,35 @@ def historical_margins_and_reinvestment(
         y: historical_reinvestment_rate(df.loc[y], df.loc[py], tax_rates[y]) for py, y in zip(years, years[1:])
     }
     return margins, reinvestment
+
+
+def historical_roic_by_year(financials_path: str | Path = DEFAULT_FINANCIALS) -> dict[str, float]:
+    """ROIC actually realized each fiscal year (years 2..N), from Gulf Oil's own financials.
+
+    Pairs with :func:`historical_margins_and_reinvestment`'s reinvestment
+    series: together they are the two factors of the fundamental growth
+    identity ``growth = reinvestment_rate x ROIC`` that Day 4 (V1) uses to
+    replace the fixed reinvestment rate. See
+    :func:`reverse_dcf.forward.historical_roic` for the beginning-of-year
+    invested-capital convention.
+    """
+    df = to_numeric(load_financials(financials_path)).set_index("fiscal_year")
+    years = list(df.index)
+    tax_rates = {y: effective_tax_rate(df.loc[y, "ebit"], df.loc[y, "interest_expense"], df.loc[y, "tax_expense"]) for y in years}
+    return {y: historical_roic(df.loc[y], df.loc[py], tax_rates[y]) for py, y in zip(years, years[1:])}
+
+
+def working_capital_release_years(financials_path: str | Path = DEFAULT_FINANCIALS) -> list[str]:
+    """Fiscal years (2..N) where net working capital fell versus the prior year.
+
+    See :func:`reverse_dcf.forward.is_working_capital_release_year`. These
+    are the years a reinvestment rate reads artificially low (or negative)
+    for a reason that has nothing to do with the business shrinking its
+    capital base.
+    """
+    df = to_numeric(load_financials(financials_path)).set_index("fiscal_year")
+    years = list(df.index)
+    return [y for py, y in zip(years, years[1:]) if is_working_capital_release_year(df.loc[y], df.loc[py])]
 
 
 def grid_implied_growth(

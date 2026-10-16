@@ -7,8 +7,12 @@ from reverse_dcf.forward import (
     DEFAULT_FINANCIALS,
     DcfAssumptions,
     base_case_from_financials,
+    check_growth_reinvestment_consistency,
     fcff_from_revenue,
     historical_reinvestment_rate,
+    historical_roic,
+    invested_capital,
+    is_working_capital_release_year,
     present_value,
     project_fcff,
     project_revenue,
@@ -116,6 +120,75 @@ def test_historical_reinvestment_rate_formula():
     # nopat = 200*(1-0.25) = 150; reinvestment = 80 - 20 + (150-130) = 80; rate = 80/150.
     rate = historical_reinvestment_rate(current, prior, tax_rate=0.25)
     assert rate == pytest.approx(80.0 / 150.0)
+
+
+def test_invested_capital_is_total_assets_less_cash():
+    row = pd.Series({"total_assets": 230449.91, "cash_and_equivalents": 70223.75})
+    assert invested_capital(row) == pytest.approx(230449.91 - 70223.75)
+
+
+def test_historical_roic_uses_beginning_of_year_invested_capital():
+    # NOPAT = 200*(1-0.25) = 150; prior-year invested capital = 1000-100 = 900; ROIC = 150/900.
+    current = pd.Series({"ebit": 200.0})
+    prior = pd.Series({"total_assets": 1000.0, "cash_and_equivalents": 100.0})
+    roic = historical_roic(current, prior, tax_rate=0.25)
+    assert roic == pytest.approx(150.0 / 900.0)
+
+
+def test_is_working_capital_release_year_flags_a_fall_in_nwc():
+    current = pd.Series({"net_working_capital": 90.0})
+    prior = pd.Series({"net_working_capital": 100.0})
+    assert is_working_capital_release_year(current, prior)
+
+
+def test_is_working_capital_release_year_is_false_when_nwc_builds():
+    current = pd.Series({"net_working_capital": 110.0})
+    prior = pd.Series({"net_working_capital": 100.0})
+    assert not is_working_capital_release_year(current, prior)
+
+
+def test_gulf_oils_latest_fiscal_year_is_a_working_capital_release_year():
+    # D6/V1 context: FY2023-24's negative reinvestment rate (-15.68%, see
+    # CRITIQUES.md V1) is a working-capital release, not the business
+    # disinvesting in its fixed asset base.
+    df = to_numeric(load_financials(DEFAULT_FINANCIALS)).set_index("fiscal_year")
+    current, prior = df.loc["FY2023-24"], df.loc["FY2022-23"]
+    assert is_working_capital_release_year(current, prior)
+
+
+def test_check_growth_reinvestment_consistency_passes_when_signs_and_roic_agree():
+    # growth 10%, reinvestment 40% -> implied ROIC 25%, inside the default band.
+    check_growth_reinvestment_consistency(0.10, 0.40)
+
+
+def test_check_growth_reinvestment_consistency_rejects_positive_growth_with_non_positive_reinvestment():
+    with pytest.raises(ValueError):
+        check_growth_reinvestment_consistency(0.10, -0.1568)
+
+
+def test_check_growth_reinvestment_consistency_rejects_an_implausible_implied_roic():
+    # growth 10%, reinvestment 1% -> implied ROIC 1000%, outside the default [0%, 100%] band.
+    with pytest.raises(ValueError):
+        check_growth_reinvestment_consistency(0.10, 0.01)
+
+
+def test_zero_growth_is_always_consistent_regardless_of_reinvestment_sign():
+    # growth=0 has no ROIC claim to make -- any reinvestment rate is fine.
+    check_growth_reinvestment_consistency(0.0, -0.1568)
+
+
+def test_base_case_reinvestment_is_inconsistent_with_positive_forecast_growth():
+    # V1 (Day 3-4): base_case_from_financials pins reinvestment_rate to
+    # FY2023-24's actual, a working-capital release year with a negative
+    # rate (-15.68%). Pairing that fixed negative rate with any positive
+    # forecast growth, as every solve.py caller already does, violates
+    # growth = reinvestment_rate x ROIC -- there is no real ROIC that
+    # produces positive growth from negative reinvestment. This is expected
+    # to fail until Day 4 replaces the fixed reinvestment rate with
+    # growth / ROIC (reinvestment re-derived from the growth being forecast,
+    # not pinned to one historical year regardless of sign).
+    base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=0.10)
+    check_growth_reinvestment_consistency(base.revenue_growth, base.reinvestment_rate)
 
 
 def test_base_case_from_financials_uses_days_2_and_3_outputs_not_new_numbers():

@@ -102,6 +102,94 @@ def historical_reinvestment_rate(df_row: "pd.Series", prior_row: "pd.Series", ta
     return reinvestment / nopat
 
 
+def is_working_capital_release_year(df_row: "pd.Series", prior_row: "pd.Series") -> bool:
+    """True when net working capital *fell* versus the prior fiscal year.
+
+    A release year hands cash back into ``historical_reinvestment_rate``'s
+    numerator instead of consuming it, which is how that rate goes negative
+    even in years ``capex`` comfortably exceeds ``depreciation_amortization``
+    (V1: the latest fiscal year, FY2023-24, is one of these). It is a
+    one-off working-capital swing, not a sign that the business is
+    shrinking its asset base, so a reinvestment rate built from a release
+    year should not be read as "the company disinvests every year."
+    """
+    return df_row["net_working_capital"] < prior_row["net_working_capital"]
+
+
+def invested_capital(df_row: "pd.Series") -> float:
+    """Approximate invested capital for one fiscal year: ``total_assets - cash_and_equivalents``.
+
+    ``financials.py``'s schema has no separate current-liabilities or
+    book-equity column to net out non-interest-bearing current liabilities
+    the textbook way (``invested capital = total debt + book equity -
+    cash``), so this treats every non-cash asset as capital employed in the
+    business. That overstates invested capital by whatever non-interest
+    liabilities (trade payables, provisions) fund part of the asset base -
+    a known approximation, not a precise book-equity figure, and good
+    enough for :func:`historical_roic`'s job of bounding whether a
+    reinvestment rate is economically plausible, not for a standalone ROIC
+    headline.
+    """
+    return df_row["total_assets"] - df_row["cash_and_equivalents"]
+
+
+def historical_roic(df_row: "pd.Series", prior_row: "pd.Series", tax_rate: float) -> float:
+    """Return on invested capital for one fiscal year: NOPAT(t) / invested capital at the *start* of the year (t-1).
+
+    Beginning-of-year capital, not the year-end figure, because the year's
+    NOPAT was earned on the capital base already in place when the year
+    started - the same convention :func:`reverse_dcf.wacc`'s cost of debt
+    uses (averaging rather than year-end ``total_debt``) to avoid crediting
+    a year's return to capital it only held for part of the year.
+    """
+    nopat = df_row["ebit"] * (1 - tax_rate)
+    return nopat / invested_capital(prior_row)
+
+
+def check_growth_reinvestment_consistency(
+    revenue_growth: float,
+    reinvestment_rate: float,
+    roic_band: tuple[float, float] = (0.0, 1.0),
+) -> None:
+    """Raise ``ValueError`` if ``revenue_growth`` and ``reinvestment_rate`` cannot come from the same real ROIC.
+
+    The fundamental growth identity (Damodaran) is
+    ``growth = reinvestment_rate x ROIC``. Two ways that identity breaks:
+
+    - ``revenue_growth > 0`` with ``reinvestment_rate <= 0``: there is no
+      real (let alone positive) ROIC that multiplies a non-positive
+      reinvestment rate into positive growth. V1: Day 3-4 of
+      ``NEXT_STEPS.md`` exists because :func:`base_case_from_financials`
+      pairs a positive forecast growth rate with FY2023-24's
+      reinvestment rate (-15.68%, a working-capital release year - see
+      :func:`is_working_capital_release_year`) without ever checking this.
+    - the ROIC the identity *would* imply (``revenue_growth /
+      reinvestment_rate``, when the first check passes) falls outside
+      ``roic_band``: a reinvestment rate close to zero makes the implied
+      ROIC explode even for modest growth, which is a sign the reinvestment
+      input is too small or noisy to drive a growth forecast, not a sign
+      the company earns a 500% return on capital. The default band (0%,
+      100%) is a plausibility bound on any real operating company's ROIC,
+      not a Gulf-Oil-specific fit.
+    """
+    if revenue_growth > 0 and reinvestment_rate <= 0:
+        raise ValueError(
+            f"growth ({revenue_growth:.2%}) is positive but reinvestment_rate "
+            f"({reinvestment_rate:.2%}) is not -- no real ROIC satisfies "
+            "growth = reinvestment_rate x ROIC with a non-positive reinvestment rate"
+        )
+    if revenue_growth == 0:
+        return
+    implied_roic = revenue_growth / reinvestment_rate
+    lo, hi = roic_band
+    if not (lo <= implied_roic <= hi):
+        raise ValueError(
+            f"growth ({revenue_growth:.2%}) / reinvestment_rate ({reinvestment_rate:.2%}) "
+            f"implies ROIC of {implied_roic:.2%}, outside the stated plausibility band "
+            f"[{lo:.2%}, {hi:.2%}]"
+        )
+
+
 @dataclass(frozen=True)
 class DcfAssumptions:
     revenue_base: float
