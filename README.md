@@ -4,6 +4,8 @@ Takes a share price as given and solves for the growth, margin and reinvestment 
 
 **Status:** v1 complete (Sep 2026). Next: v2 replaces the fixed negative reinvestment rate with reinvestment = growth ÷ ROIC. Part of a nine-repo equity research pipeline; [STOCKSTALKER](https://github.com/Achintya1311/STOCKSTALKER) is the front door.
 
+*Educational research on historical data. Not investment advice. Not a SEBI-registered research analyst.*
+
 ## What this is
 
 A forward DCF lets you reverse-engineer whatever answer you had already decided on, usually by nudging the terminal growth rate. This does the opposite. The price is the input; the assumptions are the output.
