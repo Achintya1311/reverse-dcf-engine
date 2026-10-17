@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -56,6 +57,7 @@ import pandas as pd
 from scipy.optimize import brentq, minimize_scalar
 
 from reverse_dcf.financials import load_financials, to_numeric
+from reverse_dcf.live_financials import FINANCIALS_SOURCE_HAND, FINANCIALS_SOURCE_LIVE, write_live_financials_csv
 from reverse_dcf.forward import (
     DEFAULT_FINANCIALS,
     TERMINAL_ROIC_SPREAD_DEFAULT,
@@ -429,6 +431,14 @@ class ReverseDcfResult:
     breakeven_reachable: bool
     max_achievable_price_perpetual: float
     growth_at_max_achievable_price_perpetual: float
+    financials_source: str = FINANCIALS_SOURCE_HAND
+    """C1 Day 23: which financials this result was solved against --
+    :data:`reverse_dcf.live_financials.FINANCIALS_SOURCE_HAND` (GULFOILLUB's
+    own ten-year, hand-transcribed base case, the default for every call
+    before Day 23) or :data:`...FINANCIALS_SOURCE_LIVE` (any ticker, via the
+    yfinance adapter). Carried through :meth:`to_contract` as an additive
+    key so nothing downstream mistakes a "lite" live result for the
+    hand-verified GULFOILLUB one."""
 
     def summary(self) -> str:
         lines = [
@@ -495,6 +505,7 @@ class ReverseDcfResult:
                 "breakeven_reachable": self.breakeven_reachable,
                 "max_achievable_price_perpetual": self.max_achievable_price_perpetual,
                 "growth_at_max_achievable_price_perpetual": self.growth_at_max_achievable_price_perpetual,
+                "financials_source": self.financials_source,
             }
         }
 
@@ -507,6 +518,7 @@ def solve(
     forecast_years: int = 10,
     terminal_growth: float | None = None,
     roic_spread: float = TERMINAL_ROIC_SPREAD_DEFAULT,
+    financials_source: str = FINANCIALS_SOURCE_HAND,
 ) -> ReverseDcfResult:
     """Run the full Day 5 reverse solve: implied growth plus the perpetual breakeven, at the base-case margin and V2's growth/ROIC-derived reinvestment schedule.
 
@@ -583,6 +595,7 @@ def solve(
         breakeven_reachable=breakeven_reachable,
         max_achievable_price_perpetual=max_price_perpetual,
         growth_at_max_achievable_price_perpetual=growth_at_max_perpetual,
+        financials_source=financials_source,
     )
 
 
@@ -610,19 +623,68 @@ def main() -> None:
         help="write the v0.7 valuation contract block (see to_contract()) as JSON to this path, "
         "for the spine to read as a file -- never as a Python import",
     )
+    parser.add_argument(
+        "--live-financials",
+        action="store_true",
+        help=(
+            "C1 Day 23: fetch --ticker's 4-5 year financials from yfinance "
+            "(reverse_dcf.live_financials) instead of reading --financials -- "
+            "the 'reverse DCF lite' path for a ticker with no hand-entered CSV"
+        ),
+    )
+    parser.add_argument(
+        "--prices-csv",
+        metavar="PATH",
+        default=None,
+        help=(
+            "an OHLCV CSV (date,...,close,...) to read the latest close as the "
+            "target price from, instead of --price or fixtures/market/<ticker>.csv "
+            "-- e.g. STOCKSTALKER's own price fixture for a ticker with no "
+            "reverse-dcf-engine market fixture"
+        ),
+    )
     args = parser.parse_args()
 
+    financials_source = FINANCIALS_SOURCE_HAND
+    if args.live_financials:
+        live_path = ROOT / "outputs" / "live_financials" / f"{args.ticker.upper()}.csv"
+        try:
+            write_live_financials_csv(args.ticker, live_path)
+        except (ValueError, OSError) as exc:
+            print(f"! could not fetch live financials for {args.ticker}: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        args.financials = str(live_path)
+        financials_source = FINANCIALS_SOURCE_LIVE
+
     market = None
-    if args.price is None:
+    if args.prices_csv:
+        prices_df = pd.read_csv(args.prices_csv)
+        last_row = prices_df.iloc[-1]
+        price = float(last_row["close"])
+        price_source = f"{args.prices_csv} (last close, {last_row['date']})"
+    elif args.price is None:
         market = load_market_price(args.ticker)
         price = market.price
+        price_source = None
     else:
         price = args.price
+        price_source = None
 
-    result = solve(price, args.financials, ticker=args.ticker, forecast_years=args.years, terminal_growth=args.terminal_growth)
+    result = solve(
+        price,
+        args.financials,
+        ticker=args.ticker,
+        forecast_years=args.years,
+        terminal_growth=args.terminal_growth,
+        financials_source=financials_source,
+    )
     print(result.summary())
     if market is not None:
         print(f"(price Rs{market.price:,.2f} from {market.source_url}, as of {market.date})")
+    elif price_source is not None:
+        print(f"(price Rs{price:,.2f} from {price_source})")
+    if args.live_financials:
+        print(f"(financials: {financials_source})")
 
     if args.contract:
         contract_path = Path(args.contract)

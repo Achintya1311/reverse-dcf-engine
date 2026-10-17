@@ -46,6 +46,7 @@ python -m reverse_dcf.solve                         # Day 5: reverse solver agai
 python -m reverse_dcf.solve --grid                  # ...plus the margin x reinvestment sensitivity grid
 python -m reverse_dcf.solve --price 1234.50          # override the fixture with an explicit price
 python -m reverse_dcf.solve --contract valuation.json  # integration day: write the v0.7 spine contract as JSON
+python -m reverse_dcf.solve --ticker ANY --live-financials --prices-csv <ohlcv.csv> --contract out.json  # Day 23: "reverse DCF lite" for any ticker, yfinance financials + a price CSV instead of GULFOILLUB's own fixtures
 python -m reverse_dcf.compare                       # Day 6: implied growth vs. Gulf Oil's own history vs. 3 lubricant peers
 python -m reverse_dcf.sensitivity                    # Day 7: tornado chart, outputs/tornado.png
 python scripts/render_report_pdf.py                  # Day 8: render REPORT.md to outputs/REPORT.pdf
@@ -530,6 +531,8 @@ Part of a nine-repo research pipeline. Stock Stalker screens the NSE universe; t
 ```
 
 Communication is by file contract, not imports, so either side can be refactored without breaking the other.
+
+**Day 23 (C1): any-stock tear sheet, reverse DCF lite.** `base_case_from_financials`/`solve` were already ticker-agnostic in everything but their input -- GULFOILLUB's own ten-year, hand-transcribed `financials.csv`. `reverse_dcf/live_financials.py` is the yfinance adapter that fills that gap for any other ticker: 4-5 fiscal years from yfinance's own annual income statement, balance sheet and cash flow statement, mapped into the same `financials.py` schema (unit-converted to the schema's lakh convention, signed fields taken as an absolute magnitude, a documented fallback chain per field for issuers missing one row). Cross-checked against GULFOILLUB's own hand-entered data, not just internally consistent: FY2023-24 revenue from yfinance is within 0.3% of the hand-transcribed figure (`tests/test_live_financials.py`). Every contract this path produces carries `financials_source: "yfinance, consolidated, 4-5 years"` (an additive key; GULFOILLUB's own committed fixture has none, since its hand-entered ten-year base case needs no such flag) so nothing downstream mistakes a "lite" live result for the hand-verified one. `--live-financials` fetches the financials; `--prices-csv` reads the target price's latest close from an OHLCV CSV (e.g. STOCKSTALKER's own fixture for a ticker with no `reverse-dcf-engine` market fixture) instead of requiring one. Stock Stalker's front door (`stockstalker.live_contracts.generate_valuation_contract`) shells out to `python -m reverse_dcf.solve --live-financials` as a subprocess, the same pattern Day 21/22 already used for the risk/factor contracts, writing `outputs/contracts/<TICKER>/valuation.json` for a ticker with no committed `fixtures/valuation/<TICKER>.json`. Known simplification, recorded rather than hidden: `compute_wacc` still prices every ticker against Gulf Oil's own India "Chemical (Basic)" industry-beta fixture -- there is no free per-sector beta source wired up yet.
 
 ## Exam mapping
 

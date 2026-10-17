@@ -1,4 +1,5 @@
 from dataclasses import replace
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -280,6 +281,77 @@ def test_cli_accepts_an_explicit_price_override(monkeypatch, capsys):
     main()
     out = capsys.readouterr().out
     assert "Rs1,500.00" in out
+
+
+def test_cli_accepts_a_prices_csv_override(monkeypatch, capsys, tmp_path):
+    import sys
+
+    from reverse_dcf.solve import main
+
+    prices_csv = tmp_path / "prices.csv"
+    pd.DataFrame(
+        {"date": ["2026-10-15", "2026-10-16"], "close": [1500.0, 1550.25]}
+    ).to_csv(prices_csv, index=False)
+    monkeypatch.setattr(sys, "argv", ["solve.py", "--prices-csv", str(prices_csv)])
+    main()
+    out = capsys.readouterr().out
+    assert "Rs1,550.25/share" in out
+    assert f"from {prices_csv} (last close, 2026-10-16)" in out
+
+
+def test_cli_live_financials_flag_fetches_and_labels_the_source(monkeypatch, capsys, tmp_path):
+    import sys
+
+    from reverse_dcf.solve import main
+
+    def fake_write_live_financials_csv(ticker, out_path):
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(
+            [
+                {
+                    "fiscal_year": "FY2022-23", "revenue": 1000.0, "ebitda": 200.0,
+                    "depreciation_amortization": 20.0, "ebit": 180.0, "interest_expense": 10.0,
+                    "tax_expense": 40.0, "net_profit": 130.0, "total_assets": 2000.0,
+                    "total_debt": 300.0, "cash_and_equivalents": 150.0, "net_working_capital": 400.0,
+                    "capex": 50.0, "shares_outstanding": 490_000_00.0,
+                },
+                {
+                    "fiscal_year": "FY2023-24", "revenue": 1200.0, "ebitda": 240.0,
+                    "depreciation_amortization": 25.0, "ebit": 215.0, "interest_expense": 12.0,
+                    "tax_expense": 48.0, "net_profit": 155.0, "total_assets": 2300.0,
+                    "total_debt": 280.0, "cash_and_equivalents": 180.0, "net_working_capital": 450.0,
+                    "capex": 60.0, "shares_outstanding": 491_000_00.0,
+                },
+            ]
+        ).to_csv(out_path, index=False)
+        return out_path
+
+    import reverse_dcf.solve as solve_module
+
+    monkeypatch.setattr(solve_module, "write_live_financials_csv", fake_write_live_financials_csv)
+    monkeypatch.setattr(sys, "argv", ["solve.py", "--ticker", "FAKE", "--live-financials", "--price", "500"])
+    main()
+    out = capsys.readouterr().out
+    assert "(financials: yfinance, consolidated, 4-5 years)" in out
+
+
+def test_cli_live_financials_flag_reports_a_fetch_failure_cleanly(monkeypatch, capsys, tmp_path):
+    import sys
+
+    from reverse_dcf.solve import main
+    import reverse_dcf.solve as solve_module
+
+    def fake_write_live_financials_csv(ticker, out_path):
+        raise ValueError(f"yfinance returned no annual financial statements for {ticker!r}")
+
+    monkeypatch.setattr(solve_module, "write_live_financials_csv", fake_write_live_financials_csv)
+    monkeypatch.setattr(sys, "argv", ["solve.py", "--ticker", "NOTATICKER", "--live-financials"])
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+    assert excinfo.value.code == 1
+    err = capsys.readouterr().err
+    assert "could not fetch live financials for NOTATICKER" in err
 
 
 def test_cli_contract_flag_writes_the_v0_7_json_block(monkeypatch, capsys, tmp_path):

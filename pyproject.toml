@@ -8,6 +8,7 @@ dependencies = [
     "pandas",
     "scipy",
     "matplotlib",
+    "yfinance",
 ]
 
 [project.optional-dependencies]
