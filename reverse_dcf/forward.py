@@ -101,14 +101,36 @@ def present_value(cashflows: list[float], wacc: float) -> float:
     return sum(cf / (1 + wacc) ** t for t, cf in enumerate(cashflows, start=1))
 
 
-def terminal_value(final_year_fcff: float, wacc: float, terminal_growth: float) -> float:
-    """Gordon growth terminal value, as of the end of the explicit forecast (not discounted to today)."""
+def terminal_value(
+    final_year_nopat: float, wacc: float, terminal_growth: float, terminal_reinvestment_rate: float
+) -> float:
+    """Gordon growth terminal value, as of the end of the explicit forecast (not discounted to today).
+
+    V6 (CRITIQUES.md, Day 18): built from a *fresh* terminal year --
+    ``final_year_nopat`` grown once more at ``terminal_growth`` and then
+    reinvested at ``terminal_reinvestment_rate`` -- not by extrapolating the
+    last explicit year's own FCFF forward at ``terminal_growth``, as this
+    function did before Day 18. That extrapolation silently inherited
+    whatever reinvestment rate funded the *explicit* growth rate (usually
+    faster than ``terminal_growth``), breaking the ``growth =
+    reinvestment_rate x ROIC`` identity exactly at the explicit/terminal
+    boundary -- the mechanical reason V2's 10-year price fell once growth
+    rose past ~1% even though GULFOILLUB's own ROIC exceeds WACC. Callers
+    that want the pre-Day-18 "extrapolate the last year's own rate forever"
+    behaviour pass that same rate as ``terminal_reinvestment_rate`` (see
+    :func:`run_dcf`'s default when :attr:`DcfAssumptions.terminal_reinvestment_rate`
+    is ``None``) -- the two are algebraically identical when the terminal
+    rate equals the last explicit year's rate, so this is a strict
+    generalisation, not a different formula for the cases that didn't have
+    the bug.
+    """
     if wacc <= terminal_growth:
         raise ValueError(
             f"wacc ({wacc:.4f}) must exceed terminal_growth ({terminal_growth:.4f}) "
             "for the terminal perpetuity to have a finite value"
         )
-    next_year_fcff = final_year_fcff * (1 + terminal_growth)
+    next_year_nopat = final_year_nopat * (1 + terminal_growth)
+    next_year_fcff = next_year_nopat * (1 - terminal_reinvestment_rate)
     return next_year_fcff / (wacc - terminal_growth)
 
 
@@ -320,6 +342,20 @@ class DcfAssumptions:
     forecast_years: int
     net_debt: float
     shares_outstanding: float
+    terminal_reinvestment_rate: float | None = None
+    """The rate reinvested in the single terminal year :func:`terminal_value`
+    prices as a perpetuity (V6: CRITIQUES.md, Day 18) -- a *different*
+    number from ``reinvestment_rate`` above whenever the explicit period's
+    growth differs from ``terminal_growth``, since the explicit schedule is
+    sized to fund the (usually faster) explicit growth rate, not the
+    terminal one. ``None`` (every path before Day 18: both direct
+    constructions, the CLI's ``--reinvestment-rate`` override, and
+    :mod:`reverse_dcf.sensitivity`'s/``grid_implied_growth``'s flat-rate
+    overrides) falls back in :func:`run_dcf` to the last explicit year's own
+    rate -- i.e. the pre-Day-18 behaviour of extrapolating that year's FCFF
+    forward unchanged, which is exactly right for a flat rate meant to hold
+    forever. Only :func:`base_case_from_financials`'s V2 growth/ROIC
+    schedule sets this explicitly, to ``terminal_growth / terminal_roic``."""
 
 
 @dataclass(frozen=True)
@@ -367,7 +403,16 @@ def run_dcf(assumptions: DcfAssumptions) -> DcfResult:
     fcffs = project_fcff(revenues, assumptions.ebit_margin, assumptions.tax_rate, assumptions.reinvestment_rate)
 
     pv_explicit = present_value(fcffs, assumptions.wacc)
-    tv = terminal_value(fcffs[-1], assumptions.wacc, assumptions.terminal_growth)
+
+    if assumptions.terminal_reinvestment_rate is not None:
+        terminal_reinvestment_rate = assumptions.terminal_reinvestment_rate
+    else:
+        last_reinvestment_rate = assumptions.reinvestment_rate
+        if isinstance(last_reinvestment_rate, (list, tuple)):
+            last_reinvestment_rate = last_reinvestment_rate[-1]
+        terminal_reinvestment_rate = last_reinvestment_rate
+    final_year_nopat = revenues[-1] * assumptions.ebit_margin * (1 - assumptions.tax_rate)
+    tv = terminal_value(final_year_nopat, assumptions.wacc, assumptions.terminal_growth, terminal_reinvestment_rate)
     pv_terminal = tv / (1 + assumptions.wacc) ** assumptions.forecast_years
 
     enterprise_value = pv_explicit + pv_terminal
@@ -433,12 +478,32 @@ def base_case_from_financials(
 
     wacc_result = compute_wacc(financials_path, fiscal_year=years[-1])
     effective_wacc = wacc_result.wacc if wacc is None else wacc
+    risk_free_rate = load_risk_free_rate()
     if terminal_growth is None:
-        terminal_growth = load_risk_free_rate()
+        terminal_growth = risk_free_rate
+    else:
+        # V6 (CRITIQUES.md, Day 18): g-infinity -- the growth rate the
+        # terminal year's own reinvestment is sized to sustain forever --
+        # never exceeds the risk-free rate, same Damodaran convention this
+        # function's docstring already states for the unoverridden default.
+        # A caller passing a higher terminal_growth (e.g. the sensitivity
+        # tornado's +1pp shock) gets the capped value consistently in both
+        # the Gordon-growth discounting below and the terminal reinvestment
+        # rate, not a growth rate paired with a reinvestment rate sized for
+        # a different, uncapped number.
+        terminal_growth = min(terminal_growth, risk_free_rate)
 
     median_roic = historical_median_roic(financials_path)
-    roic_schedule = roic_fade_schedule(median_roic, terminal_roic(effective_wacc, roic_spread), forecast_years)
+    terminal_roic_value = terminal_roic(effective_wacc, roic_spread)
+    roic_schedule = roic_fade_schedule(median_roic, terminal_roic_value, forecast_years)
     reinvestment_rate = reinvestment_schedule_from_growth(revenue_growth, roic_schedule)
+    # V6: the explicit schedule above is sized to fund revenue_growth, not
+    # terminal_growth -- its last entry is *not* a valid terminal-year
+    # reinvestment rate whenever the two differ (CRITIQUES.md V6). The
+    # terminal year gets its own rate, satisfying the same growth =
+    # reinvestment_rate x ROIC identity at terminal_growth and terminal_roic
+    # instead.
+    terminal_reinvestment_rate = terminal_growth / terminal_roic_value
 
     net_debt_lakh = current["total_debt"] - current["cash_and_equivalents"]
     return DcfAssumptions(
@@ -452,6 +517,7 @@ def base_case_from_financials(
         forecast_years=forecast_years,
         net_debt=net_debt_lakh * LAKH_TO_RUPEES,
         shares_outstanding=current["shares_outstanding"],
+        terminal_reinvestment_rate=terminal_reinvestment_rate,
     )
 
 
@@ -490,7 +556,17 @@ def main() -> None:
     if args.margin is not None:
         assumptions = DcfAssumptions(**{**assumptions.__dict__, "ebit_margin": args.margin})
     if args.reinvestment_rate is not None:
-        assumptions = DcfAssumptions(**{**assumptions.__dict__, "reinvestment_rate": args.reinvestment_rate})
+        # A flat override is meant to hold forever (V1-style), so the
+        # terminal year reinvests at that same flat rate too, not the V2
+        # schedule's terminal_growth/terminal_roic figure computed above for
+        # the unoverridden schedule -- see DcfAssumptions.terminal_reinvestment_rate.
+        assumptions = DcfAssumptions(
+            **{
+                **assumptions.__dict__,
+                "reinvestment_rate": args.reinvestment_rate,
+                "terminal_reinvestment_rate": None,
+            }
+        )
 
     result = run_dcf(assumptions)
     print(result.summary())

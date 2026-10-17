@@ -3,7 +3,7 @@ from dataclasses import replace
 import pandas as pd
 import pytest
 
-from reverse_dcf.forward import DEFAULT_FINANCIALS, base_case_from_financials, run_dcf
+from reverse_dcf.forward import DEFAULT_FINANCIALS, base_case_from_financials, run_dcf, terminal_roic
 from reverse_dcf.solve import (
     MARKET_FIXTURES,
     PriceUnreachableError,
@@ -85,7 +85,22 @@ def test_implied_growth_honors_margin_and_reinvestment_overrides():
 def test_perpetual_breakeven_growth_round_trips():
     target_price = REACHABLE_BY_BOTH_MODELS
     g = perpetual_breakeven_growth(target_price, DEFAULT_FINANCIALS)
-    base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=g, forecast_years=1, terminal_growth=g)
+    # V6 (CRITIQUES.md, Day 18): a second base_case_from_financials(...,
+    # terminal_growth=g) call here would re-apply its risk-free-rate cap to
+    # g -- correct for an *ordinary* terminal_growth override, but wrong for
+    # this function's own deliberately uncapped g (see
+    # perpetual_breakeven_growth's Day 18 docstring note). Reconstructing
+    # via replace(), the same way the function's own root-finder does,
+    # avoids re-capping a growth rate that was never capped when solved.
+    base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=0.0, forecast_years=1, terminal_growth=0.0)
+    terminal_roic_value = terminal_roic(base.wacc)
+    base = replace(
+        base,
+        revenue_growth=g,
+        terminal_growth=g,
+        reinvestment_rate=[g / terminal_roic_value],
+        terminal_reinvestment_rate=None,
+    )
     result = run_dcf(base)
     assert result.implied_share_price == pytest.approx(target_price, abs=0.01)
 
@@ -96,8 +111,8 @@ def test_perpetual_breakeven_growth_is_below_wacc():
     assert g < base.wacc
 
 
-def test_perpetual_breakeven_growth_is_now_higher_than_the_ten_year_implied_growth():
-    # V1's claim here was the opposite of this test's new name: a price that
+def test_perpetual_breakeven_growth_is_higher_than_the_ten_year_implied_growth():
+    # V1's claim here was the opposite of this test's name: a price that
     # only has to be justified for 10 years before decelerating needs a
     # *higher* explicit growth number than the same price held forever,
     # because V1's reinvestment rate was fixed regardless of growth, so
@@ -109,18 +124,24 @@ def test_perpetual_breakeven_growth_is_now_higher_than_the_ten_year_implied_grow
     # (reinvestment_schedule_from_growth), so 10 years of explicit growth
     # now *costs* 10 years of growth-scaled reinvestment, while the
     # perpetual model's single terminal-ROIC reinvestment rate is the only
-    # cost the one-year collapse ever pays. The 10-year model's own
-    # zero-growth price (~Rs960, base_case_from_financials at g=0) already
-    # exceeds the perpetual model's entire reachable range (ceiling ~Rs715,
-    # g -> wacc) -- so for any price both models can reach, the 10-year
-    # model gets there with *negative* growth (pulling price down from
-    # ~960) while the perpetual model needs zero-or-positive growth
-    # (pushing price up from its own, much lower, zero-growth price
-    # ~Rs649) to reach the same number. forever > ten_year now, not <.
+    # cost the one-year collapse ever pays -- forever > ten_year, not <.
+    #
+    # V6 (CRITIQUES.md, Day 18) moved the two models' zero-growth prices
+    # much closer together than V2 alone left them (10-year ~Rs662 vs
+    # perpetual ~Rs649, both at `base_case_from_financials`'s g=0 -- not the
+    # ~Rs960-vs-~Rs649 gap V2 reported, which came from the terminal-value
+    # bug V6 fixes: the old terminal formula let the 10-year model's
+    # terminal year grow forever with *no* reinvestment cost at g=0).
+    # REACHABLE_BY_BOTH_MODELS (Rs700) sits above both zero-growth prices
+    # now, so *both* models need positive growth to reach it -- the 10-year
+    # model's own smaller remaining gap (662 -> 700) needs only a small
+    # positive rate, well below what the perpetual model needs for the
+    # same price rise (649 -> 700) under its single, steeper terminal-ROIC
+    # reinvestment cost.
     target_price = REACHABLE_BY_BOTH_MODELS
     ten_year = implied_growth(target_price, DEFAULT_FINANCIALS)
     forever = perpetual_breakeven_growth(target_price, DEFAULT_FINANCIALS)
-    assert ten_year < 0
+    assert ten_year > 0
     assert forever > ten_year
 
 
@@ -164,7 +185,12 @@ def test_grid_implied_growth_shape_and_round_trip_on_one_cell():
 
     g = grid.loc[0.15, 0.10]
     base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=g)
-    base = replace(base, ebit_margin=0.15, reinvestment_rate=0.10)
+    # V6 (CRITIQUES.md, Day 18): a flat reinvestment_rate override means
+    # that rate holds forever, including the terminal year -- reset
+    # terminal_reinvestment_rate to None (the same reset implied_growth's
+    # own override branch applies) so the stale V2-schedule figure baked
+    # into `base` above doesn't override this flat scenario's own rate.
+    base = replace(base, ebit_margin=0.15, reinvestment_rate=0.10, terminal_reinvestment_rate=None)
     result = run_dcf(base)
     assert result.implied_share_price == pytest.approx(1061.0, abs=0.01)
 

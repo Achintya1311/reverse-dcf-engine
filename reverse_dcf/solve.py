@@ -221,7 +221,11 @@ def implied_growth(
         base = replace(base, ebit_margin=ebit_margin)
 
     if reinvestment_rate is not None:
-        base = replace(base, reinvestment_rate=reinvestment_rate)
+        # A flat override is meant to hold forever (V1-style), so the
+        # terminal year reinvests at that same flat rate too -- reset the
+        # V2 schedule's terminal_growth/terminal_roic figure base_case_from_financials
+        # computed for the *unoverridden* schedule (CRITIQUES.md V6).
+        base = replace(base, reinvestment_rate=reinvestment_rate, terminal_reinvestment_rate=None)
 
         def price_gap(g: float) -> float:
             return run_dcf(replace(base, revenue_growth=g)).implied_share_price - target_price
@@ -276,6 +280,15 @@ def perpetual_breakeven_growth(
     on the reasoning that one explicit year immediately followed by the
     same rate forever *is* the terminal state, not a fading-from-median
     window (there is no "from" with only one year).
+
+    V6 (CRITIQUES.md, Day 18): unlike :func:`reverse_dcf.forward.base_case_from_financials`'s
+    ordinary ``terminal_growth``, the growth rate this function searches for
+    is *not* capped at the risk-free rate. That cap exists so a realistic
+    terminal deceleration target never outpaces the economy forever; this
+    function instead asks the deliberately more aggressive hypothetical
+    "what if the explicit pace itself never decelerated at all" (see above),
+    so its own bracket stays bounded only by ``wacc`` (the ordinary
+    perpetuity-validity requirement), the same as before Day 18.
     """
     base = base_case_from_financials(
         financials_path, revenue_growth=0.0, forecast_years=1, terminal_growth=0.0, roic_spread=roic_spread
@@ -288,14 +301,32 @@ def perpetual_breakeven_growth(
         base = replace(base, reinvestment_rate=reinvestment_rate)
 
         def price_gap(g: float) -> float:
-            return run_dcf(replace(base, revenue_growth=g, terminal_growth=g)).implied_share_price - target_price
+            # terminal_reinvestment_rate=None: base_case_from_financials's
+            # placeholder call above (terminal_growth=0.0) baked in a stale
+            # figure; resetting it here falls back to this same flat
+            # reinvestment_rate for the terminal year too, matching
+            # "one growth rate, held forever, with one flat reinvestment
+            # rate" -- this function's whole premise (CRITIQUES.md V6).
+            return run_dcf(
+                replace(base, revenue_growth=g, terminal_growth=g, terminal_reinvestment_rate=None)
+            ).implied_share_price - target_price
     else:
         terminal_roic_value = terminal_roic(wacc, roic_spread)
 
         def price_gap(g: float) -> float:
             schedule = [g / terminal_roic_value]
+            # Same reset as above: forecast_years=1 means the explicit year
+            # *is* the terminal year (roic_fade_schedule's own docstring),
+            # so the terminal rate must track g via this schedule, not the
+            # stale placeholder from the initial base_case_from_financials call.
             return run_dcf(
-                replace(base, revenue_growth=g, terminal_growth=g, reinvestment_rate=schedule)
+                replace(
+                    base,
+                    revenue_growth=g,
+                    terminal_growth=g,
+                    reinvestment_rate=schedule,
+                    terminal_reinvestment_rate=None,
+                )
             ).implied_share_price - target_price
 
     bracket = (-0.99, wacc - 1e-6)

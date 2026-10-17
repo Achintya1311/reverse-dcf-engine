@@ -17,6 +17,7 @@ from reverse_dcf.forward import (
     project_fcff,
     project_revenue,
     run_dcf,
+    terminal_roic,
     terminal_value,
 )
 from reverse_dcf.financials import load_financials, to_numeric
@@ -53,16 +54,87 @@ def test_present_value_matches_manual_discounting():
     assert present_value(cashflows, wacc) == pytest.approx(expected)
 
 
-def test_terminal_value_is_gordon_growth_on_the_year_after_the_last_forecast():
-    tv = terminal_value(final_year_fcff=100.0, wacc=0.12, terminal_growth=0.04)
-    assert tv == pytest.approx(100.0 * 1.04 / (0.12 - 0.04))
+def test_terminal_value_is_gordon_growth_on_a_freshly_built_terminal_year():
+    # V6 (CRITIQUES.md, Day 18): terminal_value no longer takes the last
+    # explicit year's own FCFF and extrapolates it -- it takes that year's
+    # NOPAT (pre-reinvestment) and builds the terminal year itself, grown at
+    # terminal_growth and reinvested at terminal_reinvestment_rate.
+    tv = terminal_value(final_year_nopat=100.0, wacc=0.12, terminal_growth=0.04, terminal_reinvestment_rate=0.3)
+    next_year_fcff = 100.0 * 1.04 * (1 - 0.3)
+    assert tv == pytest.approx(next_year_fcff / (0.12 - 0.04))
+
+
+def test_terminal_value_matches_the_old_extrapolation_when_terminal_reinvestment_rate_equals_the_explicit_rate():
+    # The Day-18 formula is a strict generalisation, not a different one: when
+    # the terminal year's own rate happens to equal the rate that produced
+    # final_year_nopat's own FCFF (no deceleration at the boundary), the new
+    # "fresh terminal year" computation and the pre-Day-18 "extrapolate the
+    # last year's FCFF" computation must agree exactly.
+    final_year_nopat = 100.0
+    reinvestment_rate = 0.3
+    final_year_fcff = final_year_nopat * (1 - reinvestment_rate)
+    old_style_tv = final_year_fcff * 1.04 / (0.12 - 0.04)  # the pre-Day-18 formula, by hand
+    new_tv = terminal_value(final_year_nopat, wacc=0.12, terminal_growth=0.04, terminal_reinvestment_rate=reinvestment_rate)
+    assert new_tv == pytest.approx(old_style_tv)
 
 
 def test_terminal_value_rejects_growth_at_or_above_wacc():
     with pytest.raises(ValueError):
-        terminal_value(final_year_fcff=100.0, wacc=0.08, terminal_growth=0.08)
+        terminal_value(final_year_nopat=100.0, wacc=0.08, terminal_growth=0.08, terminal_reinvestment_rate=0.3)
     with pytest.raises(ValueError):
-        terminal_value(final_year_fcff=100.0, wacc=0.08, terminal_growth=0.09)
+        terminal_value(final_year_nopat=100.0, wacc=0.08, terminal_growth=0.09, terminal_reinvestment_rate=0.3)
+
+
+def test_terminal_reinvestment_rate_matches_the_last_explicit_year_when_growth_does_not_decelerate():
+    # V6/V7 continuity check (Day 18): when revenue_growth == terminal_growth
+    # (no deceleration at the explicit/terminal boundary -- the base case's
+    # own ROIC-fade schedule already ends exactly at terminal_roic, see
+    # roic_fade_schedule), the schedule's own last explicit-year rate and
+    # the new terminal_reinvestment_rate must be the *same number*: the
+    # fix changes nothing where there is nothing to fix.
+    g = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=0.0).terminal_growth
+    base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=g, forecast_years=10)
+    assert base.terminal_reinvestment_rate == pytest.approx(base.reinvestment_rate[-1])
+
+
+def test_terminal_reinvestment_rate_differs_from_the_last_explicit_year_when_growth_decelerates():
+    # The actual V6 bug: once explicit growth is faster than terminal_growth,
+    # the schedule's own last year is reinvested to fund the *explicit* rate,
+    # not terminal_growth -- so the two rates are genuinely different
+    # numbers, and extrapolating the explicit FCFF (pre-Day-18 behaviour)
+    # would silently keep using the wrong one.
+    base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=0.08, forecast_years=10)
+    assert base.terminal_growth < 0.08
+    assert base.terminal_reinvestment_rate != pytest.approx(base.reinvestment_rate[-1])
+    # And the terminal rate is always the one consistent with terminal_growth
+    # and terminal_roic, regardless of what the explicit growth rate was.
+    assert base.terminal_reinvestment_rate == pytest.approx(base.terminal_growth / terminal_roic(base.wacc))
+
+
+def test_terminal_value_is_continuous_across_the_explicit_terminal_boundary():
+    # Day 18's own continuity requirement: nothing about the terminal
+    # assumptions changes between year N and year N+1, so pushing the
+    # explicit/terminal split out by exactly one year -- one more year's
+    # cash flow at the *same* terminal_growth/terminal_reinvestment_rate,
+    # discounted back, plus a fresh terminal value computed one year further
+    # out at those same inputs -- must reproduce the original terminal
+    # value exactly. A terminal formula that silently used a different rate
+    # depending on where the boundary happened to fall (the pre-Day-18 bug,
+    # for the V2 schedule) would fail this the moment the rate it carries
+    # forward differs from the rate consistent with its own growth.
+    final_year_nopat = 12345.0
+    wacc = 0.12
+    terminal_growth = 0.05
+    terminal_reinvestment_rate = 0.4
+
+    tv_at_year_n = terminal_value(final_year_nopat, wacc, terminal_growth, terminal_reinvestment_rate)
+
+    next_nopat = final_year_nopat * (1 + terminal_growth)
+    next_fcff = next_nopat * (1 - terminal_reinvestment_rate)
+    tv_at_year_n_plus_1 = terminal_value(next_nopat, wacc, terminal_growth, terminal_reinvestment_rate)
+    tv_via_one_more_year = (next_fcff + tv_at_year_n_plus_1) / (1 + wacc)
+
+    assert tv_via_one_more_year == pytest.approx(tv_at_year_n)
 
 
 def _perpetuity_assumptions(forecast_years: int, g: float = 0.05) -> DcfAssumptions:

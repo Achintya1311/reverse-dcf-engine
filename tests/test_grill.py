@@ -57,30 +57,33 @@ def test_horizon_sensitivity_stays_well_below_realized_history_at_every_horizon(
     assert max(result.values()) < 0.10
 
 
-def test_horizon_sensitivity_increases_with_longer_horizons():
-    # Sanity check on direction, not just magnitude: a longer explicit
-    # forecast before the (slower) terminal decay kicks in means less of
-    # the low-growth terminal period is priced in, so implied growth should
-    # rise monotonically with horizon for this company's assumptions.
-    # Same V2 reachable-price substitution as the test above.
+def test_horizon_sensitivity_decreases_with_longer_horizons():
+    # Sanity check on direction, not just magnitude. V6 (CRITIQUES.md, Day
+    # 18) flipped this test's pre-Day-18 claim ("rises monotonically with
+    # horizon"): that direction came from the terminal-value bug letting a
+    # longer horizon's terminal year grow forever at no extra reinvestment
+    # cost, so a longer horizon looked "more expensive" and needed more
+    # growth to compensate. Fixed, a longer explicit horizon gives
+    # compounding growth more years to act on price (more leverage per
+    # point of growth), so *less* growth is needed to reach the same fixed
+    # price -- confirmed to fall monotonically across the default horizon
+    # set for this company's own committed financials.
     reachable_price = 700.0
     result = horizon_sensitivity(reachable_price, DEFAULT_FINANCIALS)
     values = [result[y] for y in sorted(result)]
-    assert values == sorted(values)
+    assert values == sorted(values, reverse=True)
 
 
 def test_horizon_sensitivity_reports_unreachable_horizons_as_none():
-    # V2 (CRITIQUES.md V1): at the real market price, longer horizons pay
-    # more years of growth-scaled reinvestment for the same growth rate, so
-    # some horizons that were reachable at a lower price stop being
-    # reachable at this one -- reported as None, not a crash or a
-    # fabricated number.
+    # V6 (CRITIQUES.md, Day 18): fixing the terminal-value bug lowers every
+    # horizon's price ceiling (the old formula's "free" terminal growth no
+    # longer inflates any of them), so the real market price -- already
+    # unreachable at the default 10-year horizon (test_solve.py) -- is now
+    # unreachable at every horizon in the default set, not just the longer
+    # ones V2 alone made unreachable.
     market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
     result = horizon_sensitivity(market.price, DEFAULT_FINANCIALS)
-    assert result[5] is not None and result[7] is not None
-    assert result[10] is None
-    assert result[12] is None
-    assert result[15] is None
+    assert all(v is None for v in result.values())
 
 
 def test_cli_runs_end_to_end_against_the_committed_fixtures(monkeypatch, capsys):

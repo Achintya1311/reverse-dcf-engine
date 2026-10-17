@@ -84,6 +84,15 @@ def test_sensitivity_rows_round_trip_through_the_forward_engine():
             )
         elif r.variable == "wacc":
             base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=r.low_growth, wacc=r.low_value)
+        elif r.variable == "reinvestment_rate":
+            # V6 (CRITIQUES.md, Day 18): a flat reinvestment_rate override
+            # holds forever, including the terminal year -- reset
+            # terminal_reinvestment_rate to None (same reset
+            # implied_growth's own override branch applies) so the stale
+            # V2-schedule figure baked into `base` doesn't override this
+            # flat scenario's own rate.
+            base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=r.low_growth)
+            base = replace(base, reinvestment_rate=r.low_value, terminal_reinvestment_rate=None)
         else:
             base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=r.low_growth)
             base = replace(base, **{r.variable: r.low_value})

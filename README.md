@@ -3,14 +3,14 @@
 Educational research on historical data. Not investment advice. Not a SEBI-registered research analyst.
 
 **Question:** at a given share price, what growth, margin and reinvestment does a textbook-consistent reverse DCF say must be assumed — and is that combination even reachable under the model?
-**Method:** derive reinvestment from growth via ROIC (`growth = reinvestment × ROIC`, ROIC fading from the 10-year median realized value to WACC) instead of holding one historical fiscal year's reinvestment rate fixed, then solve for the constant growth rate that reproduces the price.
-**Finding (v2):** no constant growth rate reproduces the committed price at all — the model's own ceiling is ₹962.08/share (10-year framing) or ₹715.52/share (perpetual framing), both below it. See "The headline v2 finding" below.
+**Method:** derive reinvestment from growth via ROIC (`growth = reinvestment × ROIC`, ROIC fading from the 10-year median realized value to WACC) instead of holding one historical fiscal year's reinvestment rate fixed, then solve for the constant growth rate that reproduces the price. The terminal year now satisfies the same identity at its own (slower) terminal growth, not the explicit period's.
+**Finding (v3):** no constant growth rate reproduces the committed price at all — the model's own ceiling is ₹914.55/share (10-year framing) or ₹715.52/share (perpetual framing), both below it, and v3's terminal-value fix *lowers* the 10-year ceiling further from v2's own (overstated) ₹962.08. See "The headline v3 finding" below.
 **Chart:** `outputs/tornado.png` — the margin × reinvestment sensitivity tornado.
 **Reproduce:** `python -m reverse_dcf.solve`
 
 Takes a share price as given and solves for the growth, margin and reinvestment the market must already believe — then asks whether those assumptions are plausible.
 
-**Status:** v2 (16 Oct 2026): reinvestment is now derived from growth via ROIC, not held fixed at one historical fiscal year's rate. Part of a nine-repo equity research pipeline; [STOCKSTALKER](https://github.com/Achintya1311/STOCKSTALKER) is the front door.
+**Status:** v3 (17 Oct 2026): the terminal year now reinvests at a rate consistent with terminal growth itself, not the explicit period's growth (CRITIQUES.md V6/V7, Day 18). v2 (16 Oct 2026): reinvestment is derived from growth via ROIC, not held fixed at one historical fiscal year's rate. Part of a nine-repo equity research pipeline; [STOCKSTALKER](https://github.com/Achintya1311/STOCKSTALKER) is the front door.
 
 *Educational research on historical data. Not investment advice. Not a SEBI-registered research analyst.*
 
@@ -89,13 +89,14 @@ still overrides it with a flat V1-style rate for the margin/reinvestment grid an
 tornado's own reinvestment-rate shock, which deliberately test "what if this flat historical
 rate persisted" as a separate, simpler scenario.
 
-| | v1 (through Sep 2026) | v2 (16 Oct 2026) |
-|---|---|---|
-| Reinvestment rate | Fixed at FY2023-24's actual (-15.68%), every year, every growth rate | `growth ÷ ROIC(t)`, ROIC fading 25.89% (median) → 11.61% (WACC + 0 spread) across the forecast |
-| Consistent with `growth = reinvestment × ROIC`? | No - fails for any positive growth (the bug) | Yes, by construction, for every year |
-| 10-year implied CAGR at ₹1,061.00/share | **-0.49%** | **Unreachable.** No constant growth rate reproduces ₹1,061 under v2; the model's own ceiling is **₹962.08/share** (+0.79% growth) |
-| Perpetual breakeven growth at ₹1,061.00/share | **3.52%** | **Unreachable.** Ceiling **₹715.52/share** (growth → WACC, 11.61%) |
-| Price vs. growth shape | Monotonically increasing (higher growth always meant a higher price) | Not monotonic - rises then falls, since reinvestment now grows with the growth rate itself; see `reverse_dcf.solve._solve_growth` |
+| | v1 (through Sep 2026) | v2 (16 Oct 2026) | v3 (17 Oct 2026) |
+|---|---|---|---|
+| Reinvestment rate, explicit years | Fixed at FY2023-24's actual (-15.68%), every year, every growth rate | `growth ÷ ROIC(t)`, ROIC fading 25.89% (median) → 11.61% (WACC + 0 spread) across the forecast | Unchanged from v2 |
+| Reinvestment rate, terminal year | Not distinguished from the explicit years (same fixed -15.68%) | Not distinguished from the explicit years — inherited the *last explicit year's* rate, sized for the explicit growth rate, not `terminal_growth` (CRITIQUES.md V6, the bug this version fixes) | `terminal_growth ÷ terminal_ROIC`, its own number, consistent with the terminal year's own (slower) growth |
+| Consistent with `growth = reinvestment × ROIC`? | No - fails for any positive growth (the bug) | Yes for the explicit years; no for the terminal year once explicit growth differs from terminal growth | Yes, for every year including the terminal one |
+| 10-year implied CAGR at ₹1,061.00/share | **-0.49%** | **Unreachable.** No constant growth rate reproduces ₹1,061; the model's own ceiling is **₹962.08/share** (+0.79% growth) — overstated, see below | **Unreachable, by a wider margin.** Ceiling drops to **₹914.55/share** (+11.61% growth) once the terminal year pays its own reinvestment cost honestly |
+| Perpetual breakeven growth at ₹1,061.00/share | **3.52%** | **Unreachable.** Ceiling **₹715.52/share** (growth → WACC, 11.61%) | **Unchanged — ₹715.52/share.** The perpetual model has no separate terminal year (forecast_years=1 collapses explicit and terminal into the same year), so V6's bug never applied to it |
+| Price vs. growth shape (10-year) | Monotonically increasing (higher growth always meant a higher price) | Not monotonic for GULFOILLUB's own assumptions - rises then falls, since the old terminal formula let the terminal value fall as the *explicit* reinvestment rate it inherited rose with growth (V7's two-root case); see `reverse_dcf.solve._solve_growth` | Monotonically increasing again, at least across GULFOILLUB's full feasible bracket (−99% to the ROIC-fade schedule's own floor) — the terminal value no longer depends on the explicit growth rate at all, removing the mechanism that caused the hump. V7's defensive tie-break code is unchanged and still runs (not proven monotonic for every ticker/price), but it is not hit by this company's own numbers any more |
 
 ### The headline v2 finding: today's price is unreachable, not just "pricing in decline"
 
@@ -104,7 +105,8 @@ real but soft finding (CRITIQUES.md V2 already flagged it as probably a V1 artif
 Q1 FY27 revenue grew 32.5% YoY). v2 is sharper and worse for the bull case: once reinvestment
 is forced to scale with growth at a ROIC no better than Gulf Oil's own 10-year median fading to
 its cost of capital, **no constant growth rate - positive, negative, or zero - produces a
-10-year-model price above ₹962.08/share, or a perpetual-model price above ₹715.52/share.**
+10-year-model price above ₹962.08/share** (v2's own figure; v3 below revises this ceiling
+down further) **or a perpetual-model price above ₹715.52/share.**
 Today's actual price (₹1,061.00) exceeds both ceilings. `reverse_dcf.solve.implied_growth`
 and `perpetual_breakeven_growth` both raise `PriceUnreachableError` rather than returning a
 number pretending otherwise; `solve()` catches it and reports `price_reachable=False` plus
@@ -119,14 +121,65 @@ Limitations), and a bull case resting on margin expansion, a higher sustained RO
 business mid-transition isn't something this single-stage-plus-terminal structure is built to
 capture either way (pre-existing limitation, sharper now that reinvestment responds to growth).
 
-One more V1-era intuition v2 overturns: V1 guaranteed perpetual breakeven growth was always
-*lower* than the 10-year implied growth (a longer explicit high-growth window always "cost"
-more). V2 flips this for any price both models can still reach: the 10-year model's own
-zero-growth price (~₹960) already exceeds the perpetual model's entire reachable range
-(ceiling ₹715.52), so for prices in that reachable-by-both band the 10-year model needs
-*negative* growth to pull its price down to them, while the perpetual model needs
-zero-or-positive growth to push its (much lower) zero-growth price (~₹649) up to them -
-`tests/test_solve.py::test_perpetual_breakeven_growth_is_now_higher_than_the_ten_year_implied_growth`.
+One more V1-era intuition v2 overturns, and v3 leaves overturned (with revised numbers): V1
+guaranteed perpetual breakeven growth was always *lower* than the 10-year implied growth (a
+longer explicit high-growth window always "cost" more). V2/v3 flip this for any price both
+models can still reach -
+`tests/test_solve.py::test_perpetual_breakeven_growth_is_higher_than_the_ten_year_implied_growth`
+- though v3 shrinks the gap between the two models' zero-growth prices sharply: v2's own
+10-year zero-growth price (~₹960) was itself inflated by the terminal-value bug v3 fixes (a
+"free" terminal year growing forever with no reinvestment cost at g=0); under v3 the honest
+10-year zero-growth price is ~₹662, much closer to the perpetual model's own ~₹649 (unchanged,
+since the perpetual model has no separate terminal year for the bug to touch).
+
+### v3: the terminal year pays its own reinvestment cost (CRITIQUES.md V6, V7)
+
+**What v2 still got wrong (V6).** v2 fixed the *explicit* forecast years' reinvestment rate
+but left `reverse_dcf.forward.terminal_value` extrapolating the *last explicit year's own
+FCFF* forward at `terminal_growth`, unchanged since v1. That last year's FCFF was computed
+at a reinvestment rate sized to fund the explicit growth rate `g` — usually much faster than
+`terminal_growth` — so growing it forward at the slower `terminal_growth` silently kept paying
+the fast-growth reinvestment bill into a perpetuity that was only supposed to need the slow one.
+The richer the explicit growth, the worse the mismatch: it is the mechanical reason the 10-year
+model's price *fell* once growth rose much past ~1%, even though Gulf Oil's own ROIC
+comfortably exceeds WACC (an ROIC above the discount rate should make growth value-accretive,
+not value-destructive).
+
+**The fix.** `terminal_value` no longer takes the last explicit year's FCFF; it takes that
+year's NOPAT (before reinvestment) and builds a fresh terminal year: grown once more at
+`terminal_growth`, reinvested at a *new* `terminal_reinvestment_rate = terminal_growth ÷
+terminal_ROIC` — the same growth identity the explicit years already satisfy, now applied at
+the terminal year's own (slower) growth rate instead of inheriting the explicit one.
+`terminal_growth` itself is capped at the risk-free rate even when a caller overrides it
+(Damodaran's convention that a perpetual growth rate cannot outpace the economy forever,
+already the unoverridden default), so the terminal year's own growth/reinvestment pair stays
+economically admissible. `DcfAssumptions.terminal_reinvestment_rate` is `None` everywhere except
+the V2 growth/ROIC schedule — a flat reinvestment-rate override (the CLI's `--reinvestment-rate`,
+the sensitivity tornado's and `grid_implied_growth`'s own flat-rate shocks) still means that one
+rate holds forever, terminal year included, exactly as before. `tests/test_forward.py`'s
+`test_terminal_value_is_continuous_across_the_explicit_terminal_boundary` checks the Day 18
+requirement directly: pushing the explicit/terminal split out by one year, at the same terminal
+assumptions, cannot move the total value — the split is only an accounting device.
+
+**The result is worse, not better, for the bull case — reported honestly either way (PLAN.md
+rule 5).** Fixing the bug *lowers* the 10-year ceiling, from v2's ₹962.08 to **₹914.55** (the
+old number was itself inflated by the free lunch this fix removes), widening the gap to today's
+₹1,061.00 price from ₹99 to ₹146 short. The perpetual model is untouched (₹715.52, unchanged) —
+it has no separate terminal year, since `forecast_years=1` already collapses explicit and
+terminal into the same year (`roic_fade_schedule`'s own docstring).
+
+**V7 (the two-root tie-break) is resolved for GULFOILLUB's own numbers, not by changing the
+tie-break code.** v2 found price non-monotonic in growth once reinvestment scaled with it,
+raising the possibility of two valid roots for the same target price
+(`reverse_dcf.solve._solve_growth`'s own defensive probe-and-bisect logic, added to handle
+that). Under v3, the terminal value no longer depends on the *explicit* growth rate at all —
+only on the fixed `terminal_growth`/`terminal_ROIC` pair — which removes the mechanism that
+made price turn down at high growth. Sampling the full feasible bracket for GULFOILLUB's base
+case (-99% to the ROIC-fade schedule's own floor, ~11.61%) now shows price rising
+monotonically throughout, so no price in that range has two roots any more. `_solve_growth`'s
+tie-break code is left in place, deliberately: monotonicity is an empirical property of this
+company's own numbers today, not a proof for every ticker, price, or future fiscal year, and
+the tie-break is the right fallback if a non-monotonic case ever recurs.
 
 ## Findings
 
@@ -270,38 +323,29 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
 - Ten years of hand-entered financials is a small sample and a transcription risk. Every figure is cited so it can be checked.
 - Implied assumptions are only as good as the WACC. The cost of equity uses a published India ERP rather than a bottom-up estimate.
 - The solver assumes a single-stage-plus-terminal structure. A business mid-transition may not be well described by it.
-- **v2's growth/ROIC-consistent reinvestment schedule only covers the explicit forecast
-  years; the terminal value still extrapolates the *last explicit year's* FCFF forward at
-  `terminal_growth` forever (`reverse_dcf.forward.terminal_value`, unchanged by v2).** That
-  last year's FCFF was computed at a reinvestment rate sized to fund the *explicit* growth
-  rate `g`, not the (usually much slower) `terminal_growth` the perpetuity actually assumes
-  from year 11 onward - so the terminal value structurally understates what a firm that
-  immediately decelerated its reinvestment needs to match the slower terminal growth could
-  produce. This is the mechanical reason the 10-year model's price *falls* once growth rises
-  much past ~1% (CRITIQUES.md V1/V2's new "unreachable" finding) even though Gulf Oil's own
-  ROIC comfortably exceeds WACC - an ROIC above the discount rate should make growth value-
-  accretive, and would, in a model whose terminal FCFF used `terminal_growth`'s own
-  reinvestment need instead of carrying the explicit period's higher one forward. Fixing this
-  (a steady-state terminal FCFF computed fresh at `terminal_growth / terminal_ROIC`, not by
-  extrapolating year N) is a real, scoped follow-up - not done here, since `NEXT_STEPS.md`'s
-  Day 4 asked for the reinvestment formula fix, not a terminal-value redesign, and the
-  unreachability result is itself an honest finding worth reporting as-is, not engineering
-  away before it's understood.
+- **Fixed in v3 (17 Oct 2026, CRITIQUES.md V6): the terminal value no longer extrapolates the
+  last explicit year's FCFF forward at `terminal_growth`.** It now builds a fresh terminal
+  year (NOPAT grown once more at `terminal_growth`, reinvested at its own
+  `terminal_growth / terminal_ROIC`) — see "v3: the terminal year pays its own reinvestment
+  cost" above for the full mechanism, the regression test
+  (`test_terminal_value_is_continuous_across_the_explicit_terminal_boundary`), and the revised
+  ceiling (₹914.55, down from v2's own inflated ₹962.08).
 - **The terminal ROIC spread (default 0, i.e. terminal ROIC = WACC) is a generic,
   stated convention, not a company-specific estimate - and the "unreachable at ₹1,061"
-  finding is somewhat sensitive to it.** Probing spread values directly (not committed to
-  any file, reproducible via `roic_spread=` on any `reverse_dcf.solve` function): spread 0%
-  → 10-year ceiling ₹962; spread 2% → ₹976; spread 5% → ₹1,018; spread 10% → ₹1,134 (exceeds
-  today's price). A spread that large would be a claim that Gulf Oil keeps a durable
+  finding is sensitive to it, more so after v3's fix.** Probing spread values directly (not
+  committed to any file, reproducible via `roic_spread=` on any `reverse_dcf.solve` function):
+  spread 0% → 10-year ceiling ₹914.55 (unreachable); spread 2% → reachable at 11.21% growth;
+  spread 5% → reachable at 8.08% growth; spread 10% → reachable at 5.87% growth. v3's fix makes
+  reachability flip at a *smaller* spread than v2 reported (v2: still unreachable even at a 10%
+  spread, ceiling ₹1,134) — correctly sharper, since v2's own ceiling was itself inflated by the
+  bug v3 fixes. A spread that large would be a claim that Gulf Oil keeps a durable
   above-cost-of-capital return forever, which this routine does not assert (PLAN.md rule 4) -
   but a reader who believes that claim would reach a different conclusion than "unreachable."
-- **`_solve_growth` can face two valid roots in the same bracket now that price isn't
-  monotonic in growth** (e.g. a target price between roughly ₹302 and ₹962 at the 10-year
-  horizon has one root below the ~0.8% growth peak and one above it). The current
-  tie-break always returns the root on the side closer to the bracket's lower end, documented
-  in `_solve_growth`'s own docstring - a real, if narrow, interpretive choice when both exist,
-  not hit by GULFOILLUB's own committed price (which is unreachable on both sides) but worth
-  knowing if a different ticker or a future price lands in that dual-root band.
+- **Resolved for GULFOILLUB's own numbers in v3, not by changing the code (CRITIQUES.md V7):**
+  `_solve_growth` still carries its defensive two-root tie-break (documented in its own
+  docstring), but v3's fix removed the mechanism that made price non-monotonic in growth for
+  this company's assumptions — see "v3" above. The tie-break is left in place as a fallback,
+  not proven impossible for every ticker or future price.
 - **`REPORT.md` (Day 8's write-up) and its rendered `outputs/REPORT.pdf` still quote v1's
   numbers** (-0.49% implied CAGR, 3.52% breakeven) and have not been regenerated against v2 -
   out of scope for `NEXT_STEPS.md`'s Day 4 row (README only); tracked as CRITIQUES.md P14.
