@@ -134,10 +134,12 @@ Day 8 wrote [`REPORT.md`](REPORT.md), the two-page write-up this whole project e
 produce, rendered to `outputs/REPORT.pdf` by a new `scripts/render_report_pdf.py`
 (plain-text/table typesetting via matplotlib's `PdfPages` - no new dependency, since
 matplotlib is already required for Day 7's tornado chart). It states the actual headline
-sentence plainly: at today's price (₹1,061.00/share), the market is pricing in essentially
-flat-to-declining revenue for Gulf Oil (-0.49% 10-year implied CAGR, or 3.52% on the more
-forgiving perpetual-breakeven framing) - well below Gulf Oil's own realized 14.54% and below
-every peer checked. The write-up also does the thing Day 6/7's numbers alone didn't: it
+sentence plainly: solved against the ₹1,061.00/share price captured 2026-09-12, the model's
+implied growth rate for Gulf Oil is essentially flat-to-declining (-0.49% 10-year implied CAGR,
+or 3.52% on the more forgiving perpetual-breakeven framing) - well below Gulf Oil's own
+realized 14.54% and below every peer checked. (Superseded by the v2 finding above: under the
+growth/ROIC-consistent model, this price is unreachable at any constant growth rate at all -
+see "The headline v2 finding" - this paragraph records what v1 found, for the narrative below.) The write-up also does the thing Day 6/7's numbers alone didn't: it
 separates the real finding from the modeling noise, since Day 7's own sensitivity grid shows
 implied growth ranging -5% to +25% depending which of Gulf Oil's nine historically realized
 (margin, reinvestment) year-pairs is assumed to persist - the headline direction survives that
@@ -170,10 +172,11 @@ eyeball here.
 Day 6 set Day 5's implied figures against Gulf Oil's own ten-year realized
 history and three lubricant/oil peers (`reverse_dcf/compare.py`,
 `python -m reverse_dcf.compare`). The comparison table is the actual
-argument this project exists to make: at today's price, the market is
-implying a **10-year revenue CAGR of -0.49%** (or, on the more forgiving
-perpetual-breakeven framing, **3.52% forever**) - both **well below Gulf
-Oil's own realized 10-year revenue CAGR of 14.54%** (computed directly
+argument this project exists to make: solved against the ₹1,061.00/share
+price captured 2026-09-12, the model's **implied 10-year revenue CAGR is
+-0.49%** (or, on the more forgiving perpetual-breakeven framing, **3.52%
+forever**) - both **well below Gulf Oil's own realized 10-year revenue
+CAGR of 14.54%** (computed directly
 from `data/GULFOILLUB/financials.csv`, `historical_revenue_cagr()`), and
 below **every one of the three lubricant peers checked**: Castrol India
 (6.0%), Gandhar Oil Refinery (9.0%, consolidated - its standalone entity's
@@ -181,10 +184,10 @@ compounded-sales-growth series is too short for a 10-year figure, the same
 kind of standalone-vs-consolidated judgment call Day 2 already had to make
 for Gulf Oil itself), and Savita Oil Technologies (11.0%). So the one
 sentence this project exists to produce is not "expectations exceed
-history" (the contract spec's placeholder) but its mirror image: *at
-today's price the market is pricing in essentially flat-to-declining
-revenue for Gulf Oil, a bar every comparable lubricant company - Gulf Oil's
-own past included - has cleared over the last ten years.* Sourced from
+history" (the contract spec's placeholder) but its mirror image: *the
+model's implied growth rate at today's price is essentially
+flat-to-declining for Gulf Oil, a bar every comparable lubricant company -
+Gulf Oil's own past included - has cleared over the last ten years.* Sourced from
 screener.in's free "Compounded Sales Growth" ranges table
 (`scripts/fetch_peer_comparables.py`, committed to
 `fixtures/peers/lubricants.csv`), the same free-tier, no-login source
@@ -202,12 +205,12 @@ on Day 4's forward engine, searching for the constant explicit-period revenue
 growth rate that reproduces a given market price. Solving against **today's
 actual price (₹1,061/share, screener.in, 2026-09-12)** at the FY2023-24 base
 case (13.37% margin, -15.68% reinvestment) gives an **implied 10-year growth
-rate of -0.49%** — the market is pricing in essentially flat-to-slightly-declining
-revenue, not growth. That is a real surprise against Day 2's finding of a
-~14.5% ten-year realized revenue CAGR: at today's price, expectations sit
-*well below* history, the opposite of the "expectations exceed history"
-placeholder in this project's own contract spec — worth treating as a live
-finding to interrogate in Day 6, not a mistake to explain away. The price
+rate of -0.49%** — essentially flat-to-slightly-declining, not growth. That
+is a real surprise against Day 2's finding of a ~14.5% ten-year realized
+revenue CAGR: the model's implied growth rate at today's price sits *well
+below* that realized history, the opposite of the "expectations exceed
+history" placeholder in this project's own contract spec — worth treating
+as a live finding to interrogate in Day 6, not a mistake to explain away. The price
 moved materially even against Day 1's ~₹1,140-1,180 shortlist-day estimate
 from three days earlier, so this is one noisy snapshot, not a settled
 number — see limitations. A second, more conservative number,
