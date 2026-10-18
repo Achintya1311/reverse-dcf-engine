@@ -36,7 +36,7 @@ def test_horizon_sensitivity_10y_matches_day_5_solve():
     market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
     result = horizon_sensitivity(market.price, DEFAULT_FINANCIALS, horizons=(10,))
     base_case = solve(market.price, DEFAULT_FINANCIALS, ticker="GULFOILLUB")
-    assert result[10] == pytest.approx(base_case.implied_growth)
+    assert result[10].growth == pytest.approx(base_case.implied_growth)
 
 
 def test_horizon_sensitivity_stays_well_below_realized_history_at_every_horizon():
@@ -53,8 +53,8 @@ def test_horizon_sensitivity_stays_well_below_realized_history_at_every_horizon(
     # about the model's shape, not about today's specific unreachable price.
     reachable_price = 700.0
     result = horizon_sensitivity(reachable_price, DEFAULT_FINANCIALS)
-    assert None not in result.values()
-    assert max(result.values()) < 0.10
+    assert all(r.reachable for r in result.values())
+    assert max(r.growth for r in result.values()) < 0.10
 
 
 def test_horizon_sensitivity_decreases_with_longer_horizons():
@@ -70,20 +70,44 @@ def test_horizon_sensitivity_decreases_with_longer_horizons():
     # set for this company's own committed financials.
     reachable_price = 700.0
     result = horizon_sensitivity(reachable_price, DEFAULT_FINANCIALS)
-    values = [result[y] for y in sorted(result)]
+    values = [result[y].growth for y in sorted(result)]
     assert values == sorted(values, reverse=True)
 
 
-def test_horizon_sensitivity_reports_unreachable_horizons_as_none():
+def test_horizon_sensitivity_reports_unreachable_horizons_with_their_ceiling():
     # V6 (CRITIQUES.md, Day 18): fixing the terminal-value bug lowers every
     # horizon's price ceiling (the old formula's "free" terminal growth no
     # longer inflates any of them), so the real market price -- already
     # unreachable at the default 10-year horizon (test_solve.py) -- is now
     # unreachable at every horizon in the default set, not just the longer
     # ones V2 alone made unreachable.
+    #
+    # V9 (CRITIQUES.md, Day 30): "unreachable" alone used to be all a caller
+    # got -- the None discarded PriceUnreachableError's own best_growth and
+    # best_price_gap. Every unreachable horizon now also reports how close
+    # its own best case gets, not just that it fails.
     market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
     result = horizon_sensitivity(market.price, DEFAULT_FINANCIALS)
-    assert all(v is None for v in result.values())
+    assert all(not r.reachable for r in result.values())
+    assert all(r.growth is None for r in result.values())
+    for r in result.values():
+        assert r.ceiling_price is not None
+        assert r.ceiling_growth is not None
+        # the ceiling is the closest this horizon's bracket gets -- it must
+        # actually fall short of the real price, not equal or exceed it
+        # (which would mean the horizon was reachable after all).
+        assert r.ceiling_price < market.price
+
+
+def test_horizon_sensitivity_10y_ceiling_matches_day_5_solve():
+    # Cross-check against solve()'s own PriceUnreachableError handling
+    # (reverse_dcf.solve.solve) rather than re-deriving the ceiling with
+    # separate logic that could quietly drift from it.
+    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
+    result = horizon_sensitivity(market.price, DEFAULT_FINANCIALS, horizons=(10,))
+    base_case = solve(market.price, DEFAULT_FINANCIALS, ticker="GULFOILLUB")
+    assert result[10].ceiling_price == pytest.approx(base_case.max_achievable_price_10y)
+    assert result[10].ceiling_growth == pytest.approx(base_case.growth_at_max_achievable_price_10y)
 
 
 def test_cli_runs_end_to_end_against_the_committed_fixtures(monkeypatch, capsys):

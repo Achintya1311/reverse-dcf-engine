@@ -36,6 +36,7 @@ weakening the check until it passes.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 
 from reverse_dcf.compare import historical_revenue_cagr
 from reverse_dcf.forward import DEFAULT_FINANCIALS
@@ -61,19 +62,41 @@ def base_year_robustness_check(financials_path=DEFAULT_FINANCIALS) -> dict:
 DEFAULT_HORIZONS = (5, 7, 10, 12, 15)
 
 
+@dataclass(frozen=True)
+class HorizonResult:
+    """One forecast horizon's implied growth, or how close it got.
+
+    ``growth`` is ``None`` exactly when ``reachable`` is ``False``. V9
+    (CRITIQUES.md, Day 30): rather than discarding
+    :class:`reverse_dcf.solve.PriceUnreachableError`'s own ``best_growth``/
+    ``best_price_gap`` down to a bare ``None``, an unreachable horizon keeps
+    its ceiling -- the closest price this horizon's bracket can reach
+    (``ceiling_price``) and the growth rate that gets there
+    (``ceiling_growth``) -- so a caller can report *how* unreachable that
+    horizon is, not just that it is, the same information :func:`reverse_dcf.solve.solve`
+    already surfaces for the base-case 10-year horizon via
+    ``max_achievable_price_10y``/``growth_at_max_achievable_price_10y``.
+    """
+
+    growth: float | None
+    reachable: bool
+    ceiling_price: float | None
+    ceiling_growth: float | None
+
+
 def horizon_sensitivity(
     target_price: float,
     financials_path=DEFAULT_FINANCIALS,
     *,
     horizons: tuple[int, ...] = DEFAULT_HORIZONS,
-) -> dict[int, float | None]:
+) -> dict[int, HorizonResult]:
     """10-year-equivalent implied growth at each forecast horizon in ``horizons``.
 
     Every other assumption stays at :func:`reverse_dcf.forward.base_case_from_financials`'s
     defaults (Day 5's base case), same as the headline ``forecast_years=10`` run - only
     the horizon changes.
 
-    V2 (CRITIQUES.md V1): a horizon's value is ``None`` when
+    V2 (CRITIQUES.md V1): a horizon's result is unreachable when
     :func:`reverse_dcf.solve.implied_growth` raises
     :class:`reverse_dcf.solve.PriceUnreachableError` at that horizon -- no
     longer a hypothetical, since V2 fixing the growth/reinvestment identity
@@ -86,9 +109,15 @@ def horizon_sensitivity(
     result = {}
     for years in horizons:
         try:
-            result[years] = implied_growth(target_price, financials_path, forecast_years=years)
-        except PriceUnreachableError:
-            result[years] = None
+            g = implied_growth(target_price, financials_path, forecast_years=years)
+            result[years] = HorizonResult(growth=g, reachable=True, ceiling_price=None, ceiling_growth=None)
+        except PriceUnreachableError as exc:
+            result[years] = HorizonResult(
+                growth=None,
+                reachable=False,
+                ceiling_price=target_price + exc.best_price_gap,
+                ceiling_growth=exc.best_growth,
+            )
     return result
 
 
@@ -111,9 +140,15 @@ def main() -> None:
     print(f"   -> dropping the flagged year {verdict}\n")
 
     print("2. Forecast-horizon robustness (Day 5's solver at horizons other than the default 10y):")
-    for years, g in horizon_sensitivity(price, args.financials).items():
+    for years, r in horizon_sensitivity(price, args.financials).items():
         marker = " <- base case" if years == 10 else ""
-        value = f"{g:+.2%}" if g is not None else "unreachable (V2: no growth rate reproduces this price at this horizon)"
+        if r.reachable:
+            value = f"{r.growth:+.2%}"
+        else:
+            value = (
+                "unreachable (V2: no growth rate reproduces this price at this horizon -- "
+                f"ceiling Rs{r.ceiling_price:,.2f}/share at {r.ceiling_growth:+.2%} growth)"
+            )
         print(f"   {years:>2}y horizon: implied growth {value}{marker}")
 
 
