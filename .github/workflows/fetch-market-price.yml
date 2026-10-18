@@ -1,0 +1,60 @@
+name: Refresh market price fixture
+
+# D13 (hub CRITIQUES.md): fixtures/market/GULFOILLUB.csv held a single
+# screener.in snapshot from 2026-09-12 with no automated refresh, even
+# though scripts/fetch_market_price.py already knows how to re-fetch it
+# from the same free, no-login source. This runs it without anyone
+# starting it by hand, the same pattern collect-headlines.yml
+# (headline-sentiment-vs-price) and fetch-largecaps.yml
+# (markowitz-portfolio-optimizer) already use elsewhere in this portfolio.
+#
+# Triggers once on push of this file or the script itself, so committing
+# either one starts the first real fetch with no manual dispatch. The
+# weekly schedule keeps the fixture from going stale after that.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/fetch-market-price.yml"
+      - "scripts/fetch_market_price.py"
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        # The solver's own runtime deps are heavier than this needs -
+        # fetch_market_price.py only imports pandas and requests.
+        run: pip install pandas requests
+
+      - name: Refresh GULFOILLUB's market price (best effort)
+        # screener.in layout drift or a transient fetch error is not a
+        # workflow failure - the commit step below is the real pass/fail
+        # signal for the day's run.
+        run: python scripts/fetch_market_price.py --ticker GULFOILLUB
+        continue-on-error: true
+
+      - name: Commit if the price changed
+        run: |
+          git config user.name "Achintya1311"
+          git config user.email "67464985+Achintya1311@users.noreply.github.com"
+          git add fixtures/market
+          if git diff --cached --quiet; then
+            echo "price unchanged since the last refresh - nothing to commit"
+            exit 0
+          fi
+          git commit -m "data: refresh GULFOILLUB market price ($(date -u +%Y-%m-%d))"
+          git push

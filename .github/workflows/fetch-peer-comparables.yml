@@ -1,0 +1,61 @@
+name: Refresh peer comparables fixture
+
+# D13 (hub CRITIQUES.md) scoped the market-price refresh
+# (fetch-market-price.yml); this extends the same automation to
+# fixtures/peers/lubricants.csv, on a slower cadence since the peer
+# ranges (10-year CAGR, ROE) move far less often than a daily/weekly
+# price. Each row's --ticker/--name/--statement is already known from the
+# committed fixture (research/sources.md's standalone-vs-consolidated
+# call for each name), so this is four known, explicit CLI calls, the
+# same shape as scripts/fetch_market_price.py's own single-ticker call -
+# no new per-ticker logic needed to automate it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/fetch-peer-comparables.yml"
+      - "scripts/fetch_peer_comparables.py"
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install pandas requests
+
+      - name: Refresh each peer's ranges (best effort)
+        # Any single ticker's screener.in layout drift or transient fetch
+        # error is not a workflow failure - the commit step below is the
+        # real pass/fail signal, and each ticker runs independently so one
+        # bad fetch doesn't block the others.
+        run: |
+          python scripts/fetch_peer_comparables.py --ticker GULFOILLUB --name "Gulf Oil Lubricants India" --statement standalone
+          python scripts/fetch_peer_comparables.py --ticker CASTROLIND --name "Castrol India" --statement standalone
+          python scripts/fetch_peer_comparables.py --ticker SOTL --name "Savita Oil Technologies" --statement standalone
+          python scripts/fetch_peer_comparables.py --ticker GANDHAR --name "Gandhar Oil Refinery" --statement consolidated
+        continue-on-error: true
+
+      - name: Commit if any peer's figures changed
+        run: |
+          git config user.name "Achintya1311"
+          git config user.email "67464985+Achintya1311@users.noreply.github.com"
+          git add fixtures/peers
+          if git diff --cached --quiet; then
+            echo "peer figures unchanged since the last refresh - nothing to commit"
+            exit 0
+          fi
+          git commit -m "data: refresh peer comparables fixture ($(date -u +%Y-%m-%d))"
+          git push
