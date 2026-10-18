@@ -518,19 +518,30 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
 
 ## Where this sits
 
-Part of a nine-repo research pipeline. Stock Stalker screens the NSE universe; this repo publishes a versioned artifact it reads back:
+Part of a nine-repo research pipeline. Stock Stalker screens the NSE universe; this repo publishes a versioned artifact it reads back. This is the real shape as of Day 31 (P27) -- regenerated from `python -m reverse_dcf.solve --contract <path>` against the committed GULFOILLUB fixture, not a hand-written illustration (the pre-V2 example this replaced hadn't matched `to_contract()`'s actual output since v0.7, and its three populated keys are in fact `null` for today's real ticker and price):
 
 ```json
 {
   "valuation": {
-    "implied_cagr": 0.14,
-    "implied_ebit_margin": 0.22,
-    "breakeven_growth": 0.09
+    "implied_cagr": null,
+    "implied_ebit_margin": 0.133694140806081,
+    "implied_reinvestment": null,
+    "breakeven_growth": null,
+    "implied_reinvestment_terminal": null,
+    "median_roic": 0.25887134520602134,
+    "terminal_roic": 0.11610477172909299,
+    "price_reachable": false,
+    "max_achievable_price_10y": 914.5482826509398,
+    "growth_at_max_achievable_price_10y": 0.11609717839827303,
+    "breakeven_reachable": false,
+    "max_achievable_price_perpetual": 715.5156570453562,
+    "growth_at_max_achievable_price_perpetual": 0.11609717839827302,
+    "financials_source": "hand-entered, 10-year (GULFOILLUB base case)"
   }
 }
 ```
 
-Communication is by file contract, not imports, so either side can be refactored without breaking the other.
+The `null`s are V2/V3's honest answer for GULFOILLUB at its committed price (no constant growth rate reaches it -- see the v1/v2/v3 table above); `implied_ebit_margin`, `median_roic`, `terminal_roic` and the two `max_achievable_price*`/`growth_at_max_achievable_price*` ceiling pairs are always populated. Communication is by file contract, not imports, so either side can be refactored without breaking the other.
 
 **Day 23 (C1): any-stock tear sheet, reverse DCF lite.** `base_case_from_financials`/`solve` were already ticker-agnostic in everything but their input -- GULFOILLUB's own ten-year, hand-transcribed `financials.csv`. `reverse_dcf/live_financials.py` is the yfinance adapter that fills that gap for any other ticker: 4-5 fiscal years from yfinance's own annual income statement, balance sheet and cash flow statement, mapped into the same `financials.py` schema (unit-converted to the schema's lakh convention, signed fields taken as an absolute magnitude, a documented fallback chain per field for issuers missing one row). Cross-checked against GULFOILLUB's own hand-entered data, not just internally consistent: FY2023-24 revenue from yfinance is within 0.3% of the hand-transcribed figure (`tests/test_live_financials.py`). Every contract this path produces carries `financials_source: "yfinance, consolidated, 4-5 years"` (an additive key; GULFOILLUB's own committed fixture has none, since its hand-entered ten-year base case needs no such flag) so nothing downstream mistakes a "lite" live result for the hand-verified one. `--live-financials` fetches the financials; `--prices-csv` reads the target price's latest close from an OHLCV CSV (e.g. STOCKSTALKER's own fixture for a ticker with no `reverse-dcf-engine` market fixture) instead of requiring one. Stock Stalker's front door (`stockstalker.live_contracts.generate_valuation_contract`) shells out to `python -m reverse_dcf.solve --live-financials` as a subprocess, the same pattern Day 21/22 already used for the risk/factor contracts, writing `outputs/contracts/<TICKER>/valuation.json` for a ticker with no committed `fixtures/valuation/<TICKER>.json`. Known simplification, recorded rather than hidden: `compute_wacc` still prices every ticker against Gulf Oil's own India "Chemical (Basic)" industry-beta fixture -- there is no free per-sector beta source wired up yet.
 

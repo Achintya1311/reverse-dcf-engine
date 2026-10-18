@@ -54,13 +54,30 @@ LINE_ITEM_COLUMNS = REQUIRED_COLUMNS[1:]
 def load_financials(path: str | Path) -> pd.DataFrame:
     """Load the financials CSV and validate it against the Day 2 schema.
 
-    Raises ``ValueError`` if a required column is missing. Does not raise on
-    ``PENDING`` cells - use :func:`find_pending` to check for those.
+    Raises ``ValueError`` if a required column is missing, if a cell still
+    holds the ``PENDING`` placeholder, or if ``ebitda - depreciation_amortization
+    != ebit`` for any fiscal year. The last two used to be available only as
+    :func:`find_pending` and :func:`check_ebit_identity`, which every real
+    load path (``wacc.compute_wacc``, ``forward.base_case_from_financials``,
+    ``solve``, ``compare``) skipped straight past on its way to
+    :func:`to_numeric` - this gives both the same fail-loud-at-load-time
+    discipline a non-numeric cell already gets from :func:`to_numeric`,
+    but named to the offending fiscal year instead of a generic cast error.
     """
     df = pd.read_csv(path, dtype=str)
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(f"financials.csv missing columns: {missing}")
+    pending = find_pending(df)
+    if pending:
+        named = ", ".join(f"{year} ({col})" for year, col in pending)
+        raise ValueError(f"{path}: still has PENDING cell(s): {named}")
+    mismatches = check_ebit_identity(df)
+    if mismatches:
+        raise ValueError(
+            f"{path}: ebitda - depreciation_amortization != ebit for fiscal "
+            f"year(s) {', '.join(mismatches)} (transcription or arithmetic slip)"
+        )
     return df
 
 

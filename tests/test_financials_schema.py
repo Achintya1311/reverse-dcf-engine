@@ -59,3 +59,35 @@ def test_shares_outstanding_are_positive_integers():
     shares = df["shares_outstanding"]
     assert (shares > 0).all()
     assert (shares == shares.astype(int)).all()
+
+
+_HEADER = ",".join(REQUIRED_COLUMNS)
+
+
+def test_load_financials_raises_on_a_pending_cell(tmp_path):
+    # Before this fix, only a caller that remembered to call find_pending()
+    # separately would catch this - every real load path (wacc, forward,
+    # solve, compare) went straight from load_financials to to_numeric,
+    # which does fail on PENDING but with no named fiscal year (P26).
+    bad = tmp_path / "bad_pending.csv"
+    bad.write_text(
+        _HEADER + "\n"
+        "FY2014-15,100,20,2,18,1,2,3,100,10,5,20,1,1000\n"
+        "FY2015-16,PENDING,22,2,20,1,2,3,100,10,5,20,1,1000\n"
+    )
+    with pytest.raises(ValueError, match="PENDING"):
+        load_financials(bad)
+
+
+def test_load_financials_raises_on_an_ebit_identity_mismatch(tmp_path):
+    # 25 - 2 = 23, not the stated ebit of 19 - a transcription slip that
+    # check_ebit_identity has always been able to detect, but that no real
+    # load path ever called it to check (P26).
+    bad = tmp_path / "bad_ebit.csv"
+    bad.write_text(
+        _HEADER + "\n"
+        "FY2014-15,100,20,2,18,1,2,3,100,10,5,20,1,1000\n"
+        "FY2015-16,110,25,2,19,1,2,3,100,10,5,20,1,1000\n"
+    )
+    with pytest.raises(ValueError, match="FY2015-16"):
+        load_financials(bad)
