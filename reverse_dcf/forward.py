@@ -242,7 +242,27 @@ def terminal_roic(wacc: float, spread: float = TERMINAL_ROIC_SPREAD_DEFAULT) -> 
     return wacc + spread
 
 
-def roic_fade_schedule(median_roic: float, terminal_roic_value: float, forecast_years: int) -> list[float]:
+ROIC_NEAR_ZERO_EPSILON = 0.01
+"""V8 (CRITIQUES.md): the smallest ROIC magnitude :func:`roic_fade_schedule`
+accepts. The fundamental growth identity divides a forecast growth rate by
+each year's ROIC (:func:`reinvestment_schedule_from_growth`); for GULFOILLUB's
+own base case (median 25.89%, fading to a terminal 11.61%) that is always a
+comfortably large divisor. ``live_financials.py``'s C1 "any ticker" path
+derives this same linear fade from an arbitrary issuer's own historical ROIC,
+with nothing stopping a loss-making or ROIC-volatile company's fade from
+landing at or near zero -- the divisor then explodes into an astronomical
+reinvestment rate (an injected -5% -> +10% fade over 10 years lands exactly
+on 0.0 at year 4) instead of raising a clear, catchable error. 1 percentage
+point is a plausibility floor, not a fit to any one company's numbers."""
+
+
+def roic_fade_schedule(
+    median_roic: float,
+    terminal_roic_value: float,
+    forecast_years: int,
+    *,
+    ticker: str | None = None,
+) -> list[float]:
     """ROIC for each explicit forecast year, fading linearly from ``median_roic`` (year 1) to
     ``terminal_roic_value`` (the last explicit year).
 
@@ -260,13 +280,30 @@ def roic_fade_schedule(median_roic: float, terminal_roic_value: float, forecast_
     :func:`perpetual_breakeven_growth`'s "already in the terminal state"
     scenario, so it returns ``[terminal_roic_value]`` rather than
     ``[median_roic]``.
+
+    V8 (CRITIQUES.md): raises ``ValueError`` naming ``ticker`` (when given)
+    and the offending forecast year if any year in the fade falls within
+    :data:`ROIC_NEAR_ZERO_EPSILON` of zero -- before any caller can divide a
+    growth rate by it.
     """
     if forecast_years < 1:
         raise ValueError("forecast_years must be at least 1")
     if forecast_years == 1:
-        return [terminal_roic_value]
-    step = (terminal_roic_value - median_roic) / (forecast_years - 1)
-    return [median_roic + step * t for t in range(forecast_years)]
+        schedule = [terminal_roic_value]
+    else:
+        step = (terminal_roic_value - median_roic) / (forecast_years - 1)
+        schedule = [median_roic + step * t for t in range(forecast_years)]
+    for year, roic in enumerate(schedule, start=1):
+        if abs(roic) < ROIC_NEAR_ZERO_EPSILON:
+            who = f"{ticker}: " if ticker else ""
+            raise ValueError(
+                f"{who}forecast year {year}'s ROIC ({roic:.2%}) is within "
+                f"{ROIC_NEAR_ZERO_EPSILON:.2%} of zero in the median -> terminal "
+                f"fade ({median_roic:.2%} -> {terminal_roic_value:.2%}) -- dividing "
+                "a forecast growth rate by it would produce an astronomical "
+                "reinvestment rate, not a real one"
+            )
+    return schedule
 
 
 def reinvestment_schedule_from_growth(revenue_growth: float, roic_schedule: list[float]) -> list[float]:
@@ -439,6 +476,7 @@ def base_case_from_financials(
     terminal_growth: float | None = None,
     wacc: float | None = None,
     roic_spread: float = TERMINAL_ROIC_SPREAD_DEFAULT,
+    ticker: str | None = None,
 ) -> DcfAssumptions:
     """Build a :class:`DcfAssumptions` off the latest fiscal year's actuals and Day 3's WACC.
 
@@ -466,6 +504,11 @@ def base_case_from_financials(
     specifically so that overriding it also moves this schedule's terminal
     anchor consistently, the way :mod:`reverse_dcf.sensitivity`'s WACC shock
     needs it to.
+
+    ``ticker`` is passed through to :func:`roic_fade_schedule` only so a
+    near-zero-ROIC failure (V8) names the company it came from; it has no
+    other effect here, and ``None`` (every call site before Day 29) keeps
+    the error generic.
     """
     df = to_numeric(load_financials(financials_path)).set_index("fiscal_year")
     years = list(df.index)
@@ -495,7 +538,7 @@ def base_case_from_financials(
 
     median_roic = historical_median_roic(financials_path)
     terminal_roic_value = terminal_roic(effective_wacc, roic_spread)
-    roic_schedule = roic_fade_schedule(median_roic, terminal_roic_value, forecast_years)
+    roic_schedule = roic_fade_schedule(median_roic, terminal_roic_value, forecast_years, ticker=ticker)
     reinvestment_rate = reinvestment_schedule_from_growth(revenue_growth, roic_schedule)
     # V6: the explicit schedule above is sized to fund revenue_growth, not
     # terminal_growth -- its last entry is *not* a valid terminal-year

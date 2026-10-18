@@ -190,6 +190,7 @@ def implied_growth(
     wacc: float | None = None,
     roic_spread: float = TERMINAL_ROIC_SPREAD_DEFAULT,
     bracket: tuple[float, float] = GROWTH_BRACKET,
+    ticker: str | None = None,
 ) -> float:
     """Solve the explicit-period revenue growth that reproduces ``target_price``.
 
@@ -218,6 +219,7 @@ def implied_growth(
         terminal_growth=terminal_growth,
         wacc=wacc,
         roic_spread=roic_spread,
+        ticker=ticker,
     )
     if ebit_margin is not None:
         base = replace(base, ebit_margin=ebit_margin)
@@ -233,7 +235,9 @@ def implied_growth(
             return run_dcf(replace(base, revenue_growth=g)).implied_share_price - target_price
     else:
         median_roic = historical_median_roic(financials_path)
-        roic_schedule = roic_fade_schedule(median_roic, terminal_roic(base.wacc, roic_spread), forecast_years)
+        roic_schedule = roic_fade_schedule(
+            median_roic, terminal_roic(base.wacc, roic_spread), forecast_years, ticker=ticker
+        )
         if bracket is GROWTH_BRACKET:
             # V2: unlike V1's fixed reinvestment rate, reinvestment = g / roic
             # grows without bound as g rises, passing 100% once g exceeds the
@@ -262,6 +266,7 @@ def perpetual_breakeven_growth(
     ebit_margin: float | None = None,
     reinvestment_rate: float | None = None,
     roic_spread: float = TERMINAL_ROIC_SPREAD_DEFAULT,
+    ticker: str | None = None,
 ) -> float:
     """The single constant growth rate, held forever, that reproduces ``target_price``.
 
@@ -293,7 +298,12 @@ def perpetual_breakeven_growth(
     perpetuity-validity requirement), the same as before Day 18.
     """
     base = base_case_from_financials(
-        financials_path, revenue_growth=0.0, forecast_years=1, terminal_growth=0.0, roic_spread=roic_spread
+        financials_path,
+        revenue_growth=0.0,
+        forecast_years=1,
+        terminal_growth=0.0,
+        roic_spread=roic_spread,
+        ticker=ticker,
     )
     if ebit_margin is not None:
         base = replace(base, ebit_margin=ebit_margin)
@@ -539,10 +549,11 @@ def solve(
         forecast_years=forecast_years,
         terminal_growth=terminal_growth,
         roic_spread=roic_spread,
+        ticker=ticker,
     )
     median_roic = historical_median_roic(financials_path)
     terminal_roic_value = terminal_roic(base.wacc, roic_spread)
-    roic_schedule = roic_fade_schedule(median_roic, terminal_roic_value, forecast_years)
+    roic_schedule = roic_fade_schedule(median_roic, terminal_roic_value, forecast_years, ticker=ticker)
 
     try:
         g = implied_growth(
@@ -551,6 +562,7 @@ def solve(
             forecast_years=forecast_years,
             terminal_growth=base.terminal_growth,
             roic_spread=roic_spread,
+            ticker=ticker,
         )
         price_reachable = True
         reinvestment_schedule = reinvestment_schedule_from_growth(g, roic_schedule)

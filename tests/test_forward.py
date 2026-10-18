@@ -9,6 +9,7 @@ from reverse_dcf.forward import (
     base_case_from_financials,
     check_growth_reinvestment_consistency,
     fcff_from_revenue,
+    historical_median_roic,
     historical_reinvestment_rate,
     historical_roic,
     invested_capital,
@@ -16,6 +17,8 @@ from reverse_dcf.forward import (
     present_value,
     project_fcff,
     project_revenue,
+    reinvestment_schedule_from_growth,
+    roic_fade_schedule,
     run_dcf,
     terminal_roic,
     terminal_value,
@@ -205,6 +208,53 @@ def test_historical_roic_uses_beginning_of_year_invested_capital():
     prior = pd.Series({"total_assets": 1000.0, "cash_and_equivalents": 100.0})
     roic = historical_roic(current, prior, tax_rate=0.25)
     assert roic == pytest.approx(150.0 / 900.0)
+
+
+def test_roic_fade_schedule_rejects_a_fade_that_crosses_zero():
+    # V8 (CRITIQUES.md): a median/terminal ROIC pair whose linear fade
+    # straddles zero lands one year's ROIC within a few ulps of 0.0 --
+    # reinvestment_schedule_from_growth would then divide a nonzero growth
+    # rate by that near-zero number, producing an astronomical reinvestment
+    # rate (reproduced directly: a -5% -> +10% fade over 10 years lands
+    # exactly on 0.0 at year 4) rather than a real one. roic_fade_schedule
+    # must refuse to build such a schedule at all, before any division
+    # happens downstream.
+    with pytest.raises(ValueError, match=r"(?i)roic.*zero|zero.*roic"):
+        roic_fade_schedule(median_roic=-0.05, terminal_roic_value=0.10, forecast_years=10)
+
+
+def test_roic_fade_schedule_error_names_the_ticker_and_year():
+    with pytest.raises(ValueError) as exc_info:
+        roic_fade_schedule(median_roic=-0.05, terminal_roic_value=0.10, forecast_years=10, ticker="LOSSMAKER")
+    message = str(exc_info.value)
+    assert "LOSSMAKER" in message
+    assert "4" in message  # the fade crosses zero at (0-indexed) year 4
+
+
+def test_roic_fade_schedule_tolerates_a_fade_that_only_approaches_zero_from_one_side():
+    # Not every low ROIC is a crossing: a fade that stays entirely on one
+    # side of zero, even if low, is a real (if weak) ROIC, not a division
+    # hazard, and must not raise.
+    schedule = roic_fade_schedule(median_roic=0.05, terminal_roic_value=0.08, forecast_years=5)
+    assert len(schedule) == 5
+
+
+def test_roic_fade_schedule_leaves_gulf_oils_own_base_case_unaffected():
+    # Day 29's own requirement: GULFOILLUB's real median -> terminal fade
+    # (25.89% -> 11.61%, per CRITIQUES.md V8) never approaches zero, so the
+    # new floor check must not change its behaviour at all.
+    median_roic = historical_median_roic(DEFAULT_FINANCIALS)
+    terminal_roic_value = terminal_roic(0.1161)  # same ballpark WACC CRITIQUES.md V8 cites
+    assert median_roic == pytest.approx(0.2589, abs=0.01)
+    schedule = roic_fade_schedule(median_roic, terminal_roic_value, forecast_years=10, ticker="GULFOILLUB")
+    assert len(schedule) == 10
+    assert all(rate > 0.05 for rate in schedule)
+
+
+def test_reinvestment_schedule_from_growth_still_divides_normally_once_the_fade_is_safe():
+    schedule = roic_fade_schedule(median_roic=0.20, terminal_roic_value=0.10, forecast_years=4)
+    reinvestment = reinvestment_schedule_from_growth(0.05, schedule)
+    assert reinvestment == [pytest.approx(0.05 / roic) for roic in schedule]
 
 
 def test_is_working_capital_release_year_flags_a_fall_in_nwc():
