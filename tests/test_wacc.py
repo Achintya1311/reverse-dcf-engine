@@ -2,6 +2,7 @@ import math
 
 import pytest
 
+from reverse_dcf.financials import REQUIRED_COLUMNS
 from reverse_dcf.wacc import (
     DEFAULT_FINANCIALS,
     CostOfDebt,
@@ -13,6 +14,26 @@ from reverse_dcf.wacc import (
     load_industry_beta,
     load_risk_free_rate,
     relever_beta,
+)
+
+_HEADER = ",".join(REQUIRED_COLUMNS)
+
+# V10: a debt-free issuer (not rare on NSE -- several F&O large caps carry
+# no debt). interest_expense and total_debt are both 0 in every year, so
+# CostOfDebt.pretax's average_total_debt denominator is exactly 0.
+_ZERO_DEBT_FINANCIALS = (
+    _HEADER + "\n"
+    "FY2022-23,1000,200,20,180,0,45,135,1000,0,100,50,30,100\n"
+    "FY2023-24,1100,220,22,198,0,49.5,148.5,1100,0,110,55,33,100\n"
+)
+
+# V11: a leveraged, loss-making issuer whose total_debt exceeds total_assets
+# -- book equity (total_assets - total_debt) is negative, the same shape as
+# the critique's own reproduction.
+_NEGATIVE_BOOK_EQUITY_FINANCIALS = (
+    _HEADER + "\n"
+    "FY2022-23,500,-40,10,-50,40,0,-90,800,900,20,10,5,50\n"
+    "FY2023-24,480,-60,10,-70,45,0,-115,750,950,15,8,4,50\n"
 )
 
 
@@ -121,3 +142,59 @@ def test_wacc_round_trips_through_its_own_formula():
     recomputed = result.weight_equity * result.cost_of_equity + result.weight_debt * result.cost_of_debt_after_tax
     assert recomputed == pytest.approx(result.wacc)
     assert not math.isnan(result.wacc)
+
+
+def test_compute_wacc_matches_the_pinned_gulfoillub_value():
+    # V10/V11 (CRITIQUES.md): the zero-debt and negative-book-equity guards
+    # added below must not move GULFOILLUB's own real WACC (positive debt,
+    # positive book equity) at all -- pinned byte-identical to the value
+    # computed before those guards existed.
+    result = compute_wacc(DEFAULT_FINANCIALS)
+    assert result.wacc == pytest.approx(0.11610477172909299, rel=1e-12)
+
+
+# --- V10: zero-debt issuer --------------------------------------------------
+
+
+def test_cost_of_debt_is_zero_not_nan_for_an_all_equity_issuer():
+    debt = CostOfDebt(interest_expense=0.0, average_total_debt=0.0, tax_rate=0.25)
+    assert debt.pretax == 0.0
+    assert debt.after_tax == 0.0
+    assert not math.isnan(debt.pretax)
+    assert not math.isnan(debt.after_tax)
+
+
+def test_compute_wacc_is_finite_and_equals_cost_of_equity_for_a_zero_debt_ticker(tmp_path):
+    path = tmp_path / "zero_debt.csv"
+    path.write_text(_ZERO_DEBT_FINANCIALS)
+    result = compute_wacc(path)
+    assert not math.isnan(result.wacc)
+    assert result.weight_debt == 0.0
+    assert result.cost_of_debt_after_tax == 0.0
+    # An all-equity firm's WACC is just its cost of equity.
+    assert result.wacc == pytest.approx(result.cost_of_equity)
+
+
+# --- V11: negative book equity ----------------------------------------------
+
+
+def test_capital_structure_raises_on_negative_book_equity():
+    # total_debt (900) exceeds total_assets (800) -- book_equity is negative,
+    # which used to silently produce weight_debt > 1 and weight_equity < 0.
+    with pytest.raises(ValueError, match="book equity"):
+        capital_structure(total_debt=900, total_assets=800, ticker="DISTRESSEDCO")
+
+
+def test_effective_tax_rate_raises_on_nonpositive_pretax_income():
+    # ebit=-70, interest_expense=45 -> pretax_income=-115: not a meaningful
+    # "effective tax rate" base, and the sign flip used to cascade silently
+    # into a negative relevered beta and cost of equity.
+    with pytest.raises(ValueError, match="pretax income"):
+        effective_tax_rate(ebit=-70, interest_expense=45, tax_expense=0, ticker="DISTRESSEDCO")
+
+
+def test_compute_wacc_raises_clearly_for_a_negative_book_equity_ticker(tmp_path):
+    path = tmp_path / "negative_book_equity.csv"
+    path.write_text(_NEGATIVE_BOOK_EQUITY_FINANCIALS)
+    with pytest.raises(ValueError, match="DISTRESSEDCO"):
+        compute_wacc(path, ticker="DISTRESSEDCO")

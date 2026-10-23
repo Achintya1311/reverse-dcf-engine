@@ -83,13 +83,28 @@ def cost_of_equity(risk_free_rate: float, beta: float, equity_risk_premium: floa
     return risk_free_rate + beta * equity_risk_premium
 
 
-def effective_tax_rate(ebit: float, interest_expense: float, tax_expense: float) -> float:
+def effective_tax_rate(
+    ebit: float, interest_expense: float, tax_expense: float, *, ticker: str | None = None
+) -> float:
     """``tax_expense / pre-tax income``, where pre-tax income = ebit - interest_expense.
 
     Mirrors ``financials.py``'s derivation of ``ebit`` (profit before tax +
     finance costs), so pre-tax income falls out without a separate column.
+
+    V11 (CRITIQUES.md): raises ``ValueError`` naming ``ticker`` (when given)
+    if ``pretax_income`` is zero or negative -- a loss-making issuer with no
+    positive pre-tax income has no meaningful "effective tax rate", and the
+    sign flip would otherwise cascade silently into a negative relevered
+    beta and cost of equity several calls downstream.
     """
     pretax_income = ebit - interest_expense
+    if pretax_income <= 0:
+        who = f"{ticker}: " if ticker else ""
+        raise ValueError(
+            f"{who}pretax income ({pretax_income:,.2f}) is zero or negative "
+            f"(ebit {ebit:,.2f} - interest expense {interest_expense:,.2f}) -- "
+            "no meaningful effective tax rate can be derived from it"
+        )
     return tax_expense / pretax_income
 
 
@@ -101,6 +116,14 @@ class CostOfDebt:
 
     @property
     def pretax(self) -> float:
+        # V10 (CRITIQUES.md): a debt-free issuer (weight_debt == 0.0, not
+        # rare on NSE) must not turn this into nan -- 0/0 is nan under
+        # IEEE-754, and weight_debt * nan is nan, not 0, so a silent nan
+        # here used to crash reverse_dcf.solve.solve() several calls
+        # downstream with an unrelated scipy error. An all-equity issuer's
+        # cost of debt is simply 0 -- it has none to cost.
+        if self.average_total_debt == 0:
+            return 0.0
         return self.interest_expense / self.average_total_debt
 
     @property
@@ -108,7 +131,9 @@ class CostOfDebt:
         return self.pretax * (1 - self.tax_rate)
 
 
-def capital_structure(total_debt: float, total_assets: float) -> tuple[float, float]:
+def capital_structure(
+    total_debt: float, total_assets: float, *, ticker: str | None = None
+) -> tuple[float, float]:
     """Return ``(weight_debt, weight_equity)`` from the balance sheet, as book values.
 
     Equity is a proxy: ``total_assets - total_debt``. The Day 2 schema
@@ -116,8 +141,23 @@ def capital_structure(total_debt: float, total_assets: float) -> tuple[float, fl
     non-debt liability (trade payables, provisions, deferred tax) into the
     "equity" side - it overstates book equity and therefore understates the
     debt weight in WACC. See the README limitations section.
+
+    V11 (CRITIQUES.md): raises ``ValueError`` naming ``ticker`` (when given)
+    if ``book_equity`` is zero or negative -- a leveraged, distressed issuer
+    with ``total_debt >= total_assets`` would otherwise silently produce
+    ``weight_debt > 1`` / ``weight_equity < 0``, which then cascades into a
+    negative relevered beta and cost of equity with no error anywhere, a
+    single plausible-looking WACC built from economically meaningless
+    intermediate values.
     """
     book_equity = total_assets - total_debt
+    if book_equity <= 0:
+        who = f"{ticker}: " if ticker else ""
+        raise ValueError(
+            f"{who}book equity ({book_equity:,.2f} = total assets {total_assets:,.2f} - "
+            f"total debt {total_debt:,.2f}) is zero or negative -- weight_debt/weight_equity "
+            "would fall outside [0, 1] and WACC would not be a meaningful blend"
+        )
     total_capital = total_debt + book_equity
     return total_debt / total_capital, book_equity / total_capital
 
@@ -155,13 +195,26 @@ class WaccResult:
         return "\n".join(lines) + "\n"
 
 
-def compute_wacc(financials_path: str | Path = DEFAULT_FINANCIALS, fiscal_year: str | None = None) -> WaccResult:
+def compute_wacc(
+    financials_path: str | Path = DEFAULT_FINANCIALS,
+    fiscal_year: str | None = None,
+    *,
+    ticker: str | None = None,
+) -> WaccResult:
     """Compute Gulf Oil Lubricants India's WACC for one fiscal year.
 
     Defaults to the most recent fiscal year in ``financials_path`` - current
     capital structure and cost of debt are the standard WACC inputs, not a
     ten-year average. Needs the fiscal year immediately before the target
     one too, to average total debt for the cost-of-debt calculation.
+
+    ``ticker`` is passed through to :func:`effective_tax_rate` and
+    :func:`capital_structure` only so a V10/V11 degenerate-capital-structure
+    failure (zero debt is handled, not an error; negative book equity or a
+    non-positive pretax income raises) names the company it came from - the
+    same convention :func:`reverse_dcf.forward.roic_fade_schedule` already
+    uses for V8. ``None`` (every call site before Day 62) keeps the error
+    generic.
     """
     df = to_numeric(load_financials(financials_path)).set_index("fiscal_year")
     years = list(df.index)
@@ -175,7 +228,9 @@ def compute_wacc(financials_path: str | Path = DEFAULT_FINANCIALS, fiscal_year: 
     current = df.loc[fiscal_year]
     prior = df.loc[years[idx - 1]]
 
-    tax_rate = effective_tax_rate(current["ebit"], current["interest_expense"], current["tax_expense"])
+    tax_rate = effective_tax_rate(
+        current["ebit"], current["interest_expense"], current["tax_expense"], ticker=ticker
+    )
     debt = CostOfDebt(
         interest_expense=current["interest_expense"],
         average_total_debt=(current["total_debt"] + prior["total_debt"]) / 2,
@@ -183,14 +238,13 @@ def compute_wacc(financials_path: str | Path = DEFAULT_FINANCIALS, fiscal_year: 
     )
 
     industry = load_industry_beta()
+    weight_debt, weight_equity = capital_structure(current["total_debt"], current["total_assets"], ticker=ticker)
     de_ratio = current["total_debt"] / (current["total_assets"] - current["total_debt"])
     beta_l = relever_beta(industry["unlevered_beta"], tax_rate, de_ratio)
 
     rf = load_risk_free_rate()
     erp = load_india_erp()
     re = cost_of_equity(rf, beta_l, erp)
-
-    weight_debt, weight_equity = capital_structure(current["total_debt"], current["total_assets"])
     wacc = weight_equity * re + weight_debt * debt.after_tax
 
     return WaccResult(

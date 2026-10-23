@@ -505,10 +505,11 @@ def base_case_from_financials(
     anchor consistently, the way :mod:`reverse_dcf.sensitivity`'s WACC shock
     needs it to.
 
-    ``ticker`` is passed through to :func:`roic_fade_schedule` only so a
-    near-zero-ROIC failure (V8) names the company it came from; it has no
-    other effect here, and ``None`` (every call site before Day 29) keeps
-    the error generic.
+    ``ticker`` is passed through to :func:`roic_fade_schedule` (V8),
+    :func:`reverse_dcf.wacc.effective_tax_rate` and
+    :func:`reverse_dcf.wacc.compute_wacc` (V10/V11) only so a degenerate-input
+    failure names the company it came from; it has no other effect here, and
+    ``None`` (every call site before Day 29) keeps the error generic.
     """
     df = to_numeric(load_financials(financials_path)).set_index("fiscal_year")
     years = list(df.index)
@@ -516,10 +517,12 @@ def base_case_from_financials(
         raise ValueError("need at least two fiscal years to derive a reinvestment rate")
     current = df.loc[years[-1]]
 
-    tax_rate = effective_tax_rate(current["ebit"], current["interest_expense"], current["tax_expense"])
+    tax_rate = effective_tax_rate(
+        current["ebit"], current["interest_expense"], current["tax_expense"], ticker=ticker
+    )
     ebit_margin = current["ebit"] / current["revenue"]
 
-    wacc_result = compute_wacc(financials_path, fiscal_year=years[-1])
+    wacc_result = compute_wacc(financials_path, fiscal_year=years[-1], ticker=ticker)
     effective_wacc = wacc_result.wacc if wacc is None else wacc
     risk_free_rate = load_risk_free_rate()
     if terminal_growth is None:
