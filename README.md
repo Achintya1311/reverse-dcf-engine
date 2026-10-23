@@ -5,7 +5,7 @@ Educational research on historical data. Not investment advice. Not a SEBI-regis
 **Question:** at a given share price, what growth, margin and reinvestment does a textbook-consistent reverse DCF say must be assumed — and is that combination even reachable under the model?
 **Method:** derive reinvestment from growth via ROIC (`growth = reinvestment × ROIC`, ROIC fading from the 10-year median realized value to WACC) instead of holding one historical fiscal year's reinvestment rate fixed, then solve for the constant growth rate that reproduces the price. The terminal year now satisfies the same identity at its own (slower) terminal growth, not the explicit period's.
 **Finding (v3):** no constant growth rate reproduces the committed price at all — the model's own ceiling is ₹914.55/share (10-year framing) or ₹715.52/share (perpetual framing), both below it, and v3's terminal-value fix *lowers* the 10-year ceiling further from v2's own (overstated) ₹962.08. See "The headline v3 finding" below.
-**Chart:** `outputs/tornado.png` — the margin × reinvestment sensitivity tornado.
+**Chart:** `outputs/tornado.png` — the five-assumption sensitivity tornado (WACC, terminal growth, EBIT margin, reinvestment rate, terminal ROIC spread).
 **Reproduce:** `python -m reverse_dcf.solve`
 
 Takes a share price as given and solves for the growth, margin and reinvestment the market must already believe — then asks whether those assumptions are plausible.
@@ -333,8 +333,8 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   ceiling (₹914.55, down from v2's own inflated ₹962.08).
 - **The terminal ROIC spread (default 0, i.e. terminal ROIC = WACC) is a generic,
   stated convention, not a company-specific estimate - and the "unreachable at ₹1,061"
-  finding is sensitive to it, more so after v3's fix.** Probing spread values directly (not
-  committed to any file, reproducible via `roic_spread=` on any `reverse_dcf.solve` function):
+  finding is sensitive to it, more so after v3's fix.** Probing spread values directly
+  (reproducible via `roic_spread=` on any `reverse_dcf.solve` function):
   spread 0% → 10-year ceiling ₹914.55 (unreachable); spread 2% → reachable at 11.21% growth;
   spread 5% → reachable at 8.08% growth; spread 10% → reachable at 5.87% growth. v3's fix makes
   reachability flip at a *smaller* spread than v2 reported (v2: still unreachable even at a 10%
@@ -342,6 +342,16 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   bug v3 fixes. A spread that large would be a claim that Gulf Oil keeps a durable
   above-cost-of-capital return forever, which this routine does not assert (PLAN.md rule 4) -
   but a reader who believes that claim would reach a different conclusion than "unreachable."
+  **Fixed in Day 64 (CRITIQUES.md V13):** the 0% and +2% values above are no longer only
+  hand-probed — `reverse_dcf.sensitivity.sensitivity_table` now shocks `roic_spread` as a
+  fifth tornado row (±2pp around the 0 default, the one threshold this bullet itself names as
+  where reachability flips — see `ROIC_SPREAD_SHOCK`'s docstring for why that size, not a
+  historical std-dev like the other rows), and
+  `tests/test_sensitivity.py::test_roic_spread_pins_the_readme_worked_numbers` pins the 0%
+  (unreachable, ~₹914.55 ceiling) and +2% (reachable, ~+11% growth) cases directly against the
+  live market-price fixture, so a future change to `roic_fade_schedule`/`terminal_roic` can't
+  silently drift them unnoticed, the same protection every other number in this README already
+  has.
 - **Resolved for GULFOILLUB's own numbers in v3, not by changing the code (CRITIQUES.md V7):**
   `_solve_growth` still carries its defensive two-root tie-break (documented in its own
   docstring), but v3's fix removed the mechanism that made price non-monotonic in growth for

@@ -4,8 +4,19 @@ from dataclasses import replace
 
 import pytest
 
-from reverse_dcf.forward import DEFAULT_FINANCIALS, base_case_from_financials, run_dcf
-from reverse_dcf.solve import MARKET_FIXTURES, historical_margins_and_reinvestment, implied_growth, load_market_price
+from reverse_dcf.forward import (
+    DEFAULT_FINANCIALS,
+    TERMINAL_ROIC_SPREAD_DEFAULT,
+    base_case_from_financials,
+    run_dcf,
+)
+from reverse_dcf.solve import (
+    MARKET_FIXTURES,
+    historical_margins_and_reinvestment,
+    implied_growth,
+    load_market_price,
+    solve,
+)
 from reverse_dcf.sensitivity import plot_tornado, sensitivity_table, to_frame
 
 # V2 (CRITIQUES.md V1): the real market price's own base case is unreachable
@@ -15,14 +26,24 @@ from reverse_dcf.sensitivity import plot_tornado, sensitivity_table, to_frame
 # tests/test_sensitivity.py::test_sensitivity_table_reports_the_real_market_price_as_mostly_unreachable
 # below for that actual, reportable finding). Tests that check the
 # round-trip/ordering *mechanics* instead use a price reachable at both
-# shock ends of all four variables, picked by probing.
-REACHABLE_PRICE = 700.0
+# shock ends of all five variables, picked by probing. 700 used to work for
+# the original four; roic_spread's own -2pp end (CRITIQUES.md V13) pushes
+# the ceiling as low as ~681 at this financials fixture, so the price moved
+# down to 650 to keep all five fully reachable at both ends.
+REACHABLE_PRICE = 650.0
 
 
-def test_sensitivity_table_covers_all_four_fixed_assumptions():
+def test_sensitivity_table_covers_all_five_fixed_assumptions():
+    # CRITIQUES.md V13: roic_spread joined the other four Day 64.
     market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
     rows = sensitivity_table(market.price, DEFAULT_FINANCIALS)
-    assert {r.variable for r in rows} == {"wacc", "terminal_growth", "ebit_margin", "reinvestment_rate"}
+    assert {r.variable for r in rows} == {
+        "wacc",
+        "terminal_growth",
+        "ebit_margin",
+        "reinvestment_rate",
+        "roic_spread",
+    }
 
 
 def test_sensitivity_table_is_sorted_by_swing_descending():
@@ -48,6 +69,7 @@ def test_sensitivity_rows_are_centered_on_the_actual_base_case():
     assert by_variable["terminal_growth"].base_value == base.terminal_growth
     assert by_variable["ebit_margin"].base_value == base.ebit_margin
     assert by_variable["reinvestment_rate"].base_value == pytest.approx(reinvestment_mean)
+    assert by_variable["roic_spread"].base_value == TERMINAL_ROIC_SPREAD_DEFAULT
     for r in rows:
         assert r.low_value < r.base_value < r.high_value
 
@@ -70,6 +92,14 @@ def test_sensitivity_table_reports_the_real_market_price_as_mostly_unreachable()
     for variable in ("wacc", "terminal_growth", "ebit_margin"):
         row = by_variable[variable]
         assert math.isnan(row.low_growth) or math.isnan(row.high_growth)
+    # roic_spread (CRITIQUES.md V13): a -2pp spread deepens the shortfall
+    # (still unreachable, NaN), but the +2pp end is the one README.md
+    # names as reachable -- the dual NaN/finite case plot_tornado's own
+    # single-marker branch exists for (see test_roic_spread_pins_the_readme_worked_numbers
+    # below for the exact pinned values).
+    roic_row = by_variable["roic_spread"]
+    assert math.isnan(roic_row.low_growth)
+    assert not math.isnan(roic_row.high_growth)
 
 
 def test_sensitivity_rows_round_trip_through_the_forward_engine():
@@ -93,6 +123,15 @@ def test_sensitivity_rows_round_trip_through_the_forward_engine():
             # flat scenario's own rate.
             base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=r.low_growth)
             base = replace(base, reinvestment_rate=r.low_value, terminal_reinvestment_rate=None)
+        elif r.variable == "roic_spread":
+            # roic_spread isn't a DcfAssumptions field (unlike wacc/terminal_growth) --
+            # it only exists as a base_case_from_financials/implied_growth
+            # keyword that reshapes reinvestment_rate and
+            # terminal_reinvestment_rate together, so it must be passed in
+            # here too rather than bolted on with dataclasses.replace.
+            base = base_case_from_financials(
+                DEFAULT_FINANCIALS, revenue_growth=r.low_growth, roic_spread=r.low_value
+            )
         else:
             base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=r.low_growth)
             base = replace(base, **{r.variable: r.low_value})
@@ -117,11 +156,30 @@ def test_higher_wacc_requires_higher_implied_growth():
     assert wacc_row.high_growth > wacc_row.low_growth
 
 
+def test_roic_spread_pins_the_readme_worked_numbers():
+    # CRITIQUES.md V13: README.md's "Limitations" section hand-probes
+    # roic_spread at the real market price and quotes two of its values by
+    # hand, with no test pinning them -- unlike every other number this
+    # project publishes (its own evidence cell). Pin both so a future change
+    # to roic_fade_schedule/terminal_roic can't silently drift them: spread
+    # 0% (today's default) stays unreachable with a ~914.55 ceiling; spread
+    # 2% (the modest shock sensitivity_table's new roic_spread row now also
+    # exercises) flips to reachable at ~+11% implied growth.
+    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
+    at_default = solve(market.price, DEFAULT_FINANCIALS, roic_spread=0.0)
+    assert at_default.price_reachable is False
+    assert at_default.max_achievable_price_10y == pytest.approx(914.55, abs=0.5)
+
+    at_plus_2pp = solve(market.price, DEFAULT_FINANCIALS, roic_spread=0.02)
+    assert at_plus_2pp.price_reachable is True
+    assert at_plus_2pp.implied_growth == pytest.approx(0.11, abs=0.01)
+
+
 def test_to_frame_has_one_row_per_variable_and_matches_the_dataclass_rows():
     market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
     rows = sensitivity_table(market.price, DEFAULT_FINANCIALS)
     frame = to_frame(rows)
-    assert len(frame) == 4
+    assert len(frame) == 5
     assert list(frame["variable"]) == [r.variable for r in rows]
     # NaN != NaN under plain equality (some rows are unreachable at the real
     # market price - see test_sensitivity_table_reports_the_real_market_price_as_mostly_unreachable),

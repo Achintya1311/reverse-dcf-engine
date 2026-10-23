@@ -1,15 +1,16 @@
 """Sensitivity analysis and tornado chart (Day 7).
 
-Day 5's solver holds WACC, EBIT margin, reinvestment rate and terminal growth
-fixed at Gulf Oil's own latest-fiscal-year actuals (or a fixture default) and
-finds the one number - implied revenue growth - that reproduces today's
-price. That leaves an obvious question unanswered: which of those four fixed
-assumptions does the implied-growth number actually depend on? A reader who
-disagrees with the WACC estimate needs to know whether that disagreement
-moves the headline number by a rounding error or by several points.
+Day 5's solver holds WACC, EBIT margin, reinvestment rate, terminal growth
+and the terminal ROIC spread fixed at Gulf Oil's own latest-fiscal-year
+actuals (or a fixture default/stated convention) and finds the one number -
+implied revenue growth - that reproduces today's price. That leaves an
+obvious question unanswered: which of those five fixed assumptions does the
+implied-growth number actually depend on? A reader who disagrees with the
+WACC estimate needs to know whether that disagreement moves the headline
+number by a rounding error or by several points.
 
 This module answers it by shocking each assumption one at a time, holding
-the other three at base case, and re-running :func:`reverse_dcf.solve.implied_growth`
+the other four at base case, and re-running :func:`reverse_dcf.solve.implied_growth`
 at the shocked low and high value. The resulting range is plotted as a
 tornado chart: variables sorted so the one that swings implied growth the
 most sits at the top.
@@ -22,7 +23,12 @@ operating profile has actually moved within, not an arbitrary +/-2pp. WACC
 and terminal growth have no equivalent multi-year series in this repo (WACC
 is a point-in-time CAPM estimate; terminal growth defaults to today's
 risk-free rate), so those two use the standard textbook DCF-sensitivity
-convention of a +/-1 percentage point shock instead. That asymmetry in method
+convention of a +/-1 percentage point shock instead. The terminal ROIC
+spread has no historical series either (CRITIQUES.md V13: it is a stated
+convention, not a company-specific estimate), so its shock instead mirrors
+the one concrete threshold README.md already names by hand: +/-2 percentage
+points, the point at which the real market price's "unreachable" headline
+conclusion flips (see :data:`ROIC_SPREAD_SHOCK`). That asymmetry in method
 is itself worth stating plainly rather than papering over with a uniform
 shock size that would only look more rigorous.
 """
@@ -41,7 +47,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from reverse_dcf.forward import DEFAULT_FINANCIALS, base_case_from_financials
+from reverse_dcf.forward import DEFAULT_FINANCIALS, TERMINAL_ROIC_SPREAD_DEFAULT, base_case_from_financials
 from reverse_dcf.solve import (
     GROWTH_BRACKET,
     MARKET_FIXTURES,
@@ -61,6 +67,15 @@ docstring)."""
 
 TERMINAL_GROWTH_SHOCK = 0.01
 """Same convention and same reasoning as :data:`WACC_SHOCK`."""
+
+ROIC_SPREAD_SHOCK = 0.02
+"""+/-2 percentage points around :data:`reverse_dcf.forward.TERMINAL_ROIC_SPREAD_DEFAULT`
+(0, i.e. terminal ROIC = WACC). CRITIQUES.md V13: README.md's own hand-probed
+``roic_spread`` values single out +2pp as the modest, named threshold where
+the headline "unreachable at the real price" conclusion flips to reachable --
+not an arbitrary round number, and not this module's usual
+historical-standard-deviation basis (``roic_spread`` has no historical
+series of its own; it is a stated convention, not an estimate)."""
 
 
 @dataclass(frozen=True)
@@ -93,7 +108,7 @@ def sensitivity_table(
     forecast_years: int = 10,
     bracket: tuple[float, float] = GROWTH_BRACKET,
 ) -> list[SensitivityRow]:
-    """Shock each of the four fixed DCF assumptions one at a time and re-solve implied growth.
+    """Shock each of the five fixed DCF assumptions one at a time and re-solve implied growth.
 
     Returns rows sorted by :attr:`SensitivityRow.swing`, largest first - the
     order a tornado chart draws top to bottom.
@@ -117,6 +132,13 @@ def sensitivity_table(
         ("terminal_growth", "Terminal growth", base.terminal_growth, TERMINAL_GROWTH_SHOCK, "terminal_growth"),
         ("ebit_margin", "EBIT margin", base.ebit_margin, margin_shock, "ebit_margin"),
         ("reinvestment_rate", "Reinvestment rate", reinvestment_mean, reinvestment_shock, "reinvestment_rate"),
+        (
+            "roic_spread",
+            "Terminal ROIC spread",
+            TERMINAL_ROIC_SPREAD_DEFAULT,
+            ROIC_SPREAD_SHOCK,
+            "roic_spread",
+        ),
     ]
 
     def _implied_growth_or_nan(**override) -> float:
@@ -281,7 +303,7 @@ def main() -> None:
     print(f"Sensitivity of implied growth to each fixed assumption -- {args.ticker} at Rs{price:,.2f}/share\n")
     for r in rows:
         print(
-            f"  {r.label:<18} base {r.base_value:>7.2%}  |  "
+            f"  {r.label:<21} base {r.base_value:>7.2%}  |  "
             f"{r.low_value:>7.2%} -> {r.low_growth:>+7.2%}   "
             f"{r.high_value:>7.2%} -> {r.high_growth:>+7.2%}   "
             f"swing {r.swing:>6.2%}"
