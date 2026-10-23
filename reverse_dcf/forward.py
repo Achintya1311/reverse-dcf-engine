@@ -213,15 +213,48 @@ def historical_roic_by_year(financials_path: str | Path = DEFAULT_FINANCIALS) ->
     return {y: historical_roic(df.loc[y], df.loc[py], tax_rates[y]) for py, y in zip(years, years[1:])}
 
 
-def historical_median_roic(financials_path: str | Path = DEFAULT_FINANCIALS) -> float:
+MIN_ROIC_OBSERVATIONS = 3
+"""V12 (CRITIQUES.md): the fewest year-over-year ROIC observations
+:func:`historical_median_roic` will anchor the fade schedule on.
+``live_financials.py``'s own :data:`live_financials.MIN_FISCAL_YEARS` (2)
+lets the C1 "any ticker" path fetch as few as two fiscal years -- exactly
+one year-over-year ROIC reading -- and a "median" of one point reports a
+realized ROIC with full two-decimal confidence from a single year that
+could be an outlier in either direction (a one-off margin spike, a
+working-capital swing, a bad or unusually good year). Three observations
+is still a thin anchor, but it is the smallest sample for which "median"
+means anything other than "whichever one value happened to be reported" --
+the same reasoning D15 already applied to the factor model's own minimum
+sample floor. GULFOILLUB's real base case (10 fiscal years, 9 observations)
+sits comfortably above it."""
+
+
+def historical_median_roic(
+    financials_path: str | Path = DEFAULT_FINANCIALS,
+    *,
+    ticker: str | None = None,
+) -> float:
     """Median of :func:`historical_roic_by_year`'s per-fiscal-year series.
 
     V2's anchor for the *start* of the ROIC-fade schedule
     (:func:`roic_fade_schedule`): the business's own typical realized return
     on capital, not one single (possibly unusual) fiscal year -- the exact
     problem V1 had with reinvestment rate, now avoided for ROIC too.
+
+    V12 (CRITIQUES.md): raises ``ValueError`` naming ``ticker`` (when given)
+    and the observation count when fewer than :data:`MIN_ROIC_OBSERVATIONS`
+    year-over-year ROIC readings are available, rather than silently
+    anchoring the whole fade schedule on a single historical year.
     """
-    return statistics.median(historical_roic_by_year(financials_path).values())
+    roic_by_year = historical_roic_by_year(financials_path)
+    if len(roic_by_year) < MIN_ROIC_OBSERVATIONS:
+        label = f"{ticker}: " if ticker else ""
+        raise ValueError(
+            f"{label}only {len(roic_by_year)} year-over-year ROIC observation(s) available "
+            f"(need at least {MIN_ROIC_OBSERVATIONS} for historical_median_roic's anchor "
+            "to mean more than a single year's reading)"
+        )
+    return statistics.median(roic_by_year.values())
 
 
 TERMINAL_ROIC_SPREAD_DEFAULT = 0.0
@@ -539,7 +572,7 @@ def base_case_from_financials(
         # a different, uncapped number.
         terminal_growth = min(terminal_growth, risk_free_rate)
 
-    median_roic = historical_median_roic(financials_path)
+    median_roic = historical_median_roic(financials_path, ticker=ticker)
     terminal_roic_value = terminal_roic(effective_wacc, roic_spread)
     roic_schedule = roic_fade_schedule(median_roic, terminal_roic_value, forecast_years, ticker=ticker)
     reinvestment_rate = reinvestment_schedule_from_growth(revenue_growth, roic_schedule)

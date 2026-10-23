@@ -12,6 +12,7 @@ from reverse_dcf.forward import (
     historical_median_roic,
     historical_reinvestment_rate,
     historical_roic,
+    historical_roic_by_year,
     invested_capital,
     is_working_capital_release_year,
     present_value,
@@ -23,8 +24,23 @@ from reverse_dcf.forward import (
     terminal_roic,
     terminal_value,
 )
-from reverse_dcf.financials import load_financials, to_numeric
+from reverse_dcf.financials import REQUIRED_COLUMNS, load_financials, to_numeric
 from reverse_dcf.wacc import compute_wacc, load_risk_free_rate
+
+_HEADER = ",".join(REQUIRED_COLUMNS)
+
+# V12 (CRITIQUES.md): only two fiscal years -- historical_roic_by_year's
+# year-over-year pairing (years 2..N) gives exactly one ROIC observation,
+# reproducing the critique's own evidence that historical_median_roic's
+# "median" can rest on a single data point. Two fiscal years is exactly
+# live_financials.MIN_FISCAL_YEARS, so base_case_from_financials's own
+# "need at least two fiscal years" check passes -- the gap is one level
+# down, in the ROIC anchor itself.
+_TWO_YEAR_FINANCIALS = (
+    _HEADER + "\n"
+    "FY2022-23,1000,200,20,180,10,42.5,127.5,1000,200,100,50,30,100\n"
+    "FY2023-24,1100,220,22,198,11,46.75,140.25,1100,220,110,55,33,100\n"
+)
 
 
 def test_project_revenue_compounds_at_a_constant_rate():
@@ -249,6 +265,35 @@ def test_roic_fade_schedule_leaves_gulf_oils_own_base_case_unaffected():
     schedule = roic_fade_schedule(median_roic, terminal_roic_value, forecast_years=10, ticker="GULFOILLUB")
     assert len(schedule) == 10
     assert all(rate > 0.05 for rate in schedule)
+
+
+def test_historical_median_roic_rejects_a_single_year_over_year_observation(tmp_path):
+    path = tmp_path / "two_year.csv"
+    path.write_text(_TWO_YEAR_FINANCIALS)
+    # Confirms the fixture reproduces V12's own evidence before asserting
+    # the guard: exactly one year-over-year ROIC pair for two fiscal years.
+    assert len(historical_roic_by_year(path)) == 1
+    with pytest.raises(ValueError, match=r"(?i)roic"):
+        historical_median_roic(path)
+
+
+def test_historical_median_roic_error_names_the_ticker_and_observation_count(tmp_path):
+    path = tmp_path / "two_year.csv"
+    path.write_text(_TWO_YEAR_FINANCIALS)
+    with pytest.raises(ValueError) as exc_info:
+        historical_median_roic(path, ticker="THINHISTORYCO")
+    message = str(exc_info.value)
+    assert "THINHISTORYCO" in message
+    assert "1" in message
+
+
+def test_historical_median_roic_leaves_gulf_oils_own_base_case_unaffected():
+    # V12's own requirement: GULFOILLUB's real 10-fiscal-year history (9
+    # year-over-year ROIC observations) sits comfortably above the new
+    # floor and must be unaffected.
+    assert len(historical_roic_by_year(DEFAULT_FINANCIALS)) == 9
+    median_roic = historical_median_roic(DEFAULT_FINANCIALS)
+    assert median_roic == pytest.approx(0.2589, abs=0.01)
 
 
 def test_reinvestment_schedule_from_growth_still_divides_normally_once_the_fade_is_safe():

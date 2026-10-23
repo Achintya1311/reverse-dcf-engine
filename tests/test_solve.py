@@ -323,6 +323,26 @@ def test_cli_live_financials_flag_fetches_and_labels_the_source(monkeypatch, cap
                     "total_debt": 280.0, "cash_and_equivalents": 180.0, "net_working_capital": 450.0,
                     "capex": 60.0, "shares_outstanding": 491_000_00.0,
                 },
+                # V12 (CRITIQUES.md): historical_median_roic now requires at
+                # least MIN_ROIC_OBSERVATIONS (3) year-over-year ROIC
+                # readings, which needs 4 fiscal years, not 2 -- this test
+                # is about the CLI's source label, not the floor itself (see
+                # test_forward.py's own V12 tests for that), so it just
+                # needs enough history to clear it.
+                {
+                    "fiscal_year": "FY2024-25", "revenue": 1400.0, "ebitda": 280.0,
+                    "depreciation_amortization": 30.0, "ebit": 250.0, "interest_expense": 14.0,
+                    "tax_expense": 56.0, "net_profit": 180.0, "total_assets": 2600.0,
+                    "total_debt": 260.0, "cash_and_equivalents": 210.0, "net_working_capital": 500.0,
+                    "capex": 70.0, "shares_outstanding": 492_000_00.0,
+                },
+                {
+                    "fiscal_year": "FY2025-26", "revenue": 1600.0, "ebitda": 320.0,
+                    "depreciation_amortization": 35.0, "ebit": 285.0, "interest_expense": 16.0,
+                    "tax_expense": 64.0, "net_profit": 205.0, "total_assets": 2900.0,
+                    "total_debt": 240.0, "cash_and_equivalents": 240.0, "net_working_capital": 550.0,
+                    "capex": 80.0, "shares_outstanding": 493_000_00.0,
+                },
             ]
         ).to_csv(out_path, index=False)
         return out_path

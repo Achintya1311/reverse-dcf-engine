@@ -234,7 +234,7 @@ def implied_growth(
         def price_gap(g: float) -> float:
             return run_dcf(replace(base, revenue_growth=g)).implied_share_price - target_price
     else:
-        median_roic = historical_median_roic(financials_path)
+        median_roic = historical_median_roic(financials_path, ticker=ticker)
         roic_schedule = roic_fade_schedule(
             median_roic, terminal_roic(base.wacc, roic_spread), forecast_years, ticker=ticker
         )
@@ -551,7 +551,7 @@ def solve(
         roic_spread=roic_spread,
         ticker=ticker,
     )
-    median_roic = historical_median_roic(financials_path)
+    median_roic = historical_median_roic(financials_path, ticker=ticker)
     terminal_roic_value = terminal_roic(base.wacc, roic_spread)
     roic_schedule = roic_fade_schedule(median_roic, terminal_roic_value, forecast_years, ticker=ticker)
 
