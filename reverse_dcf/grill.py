@@ -28,7 +28,18 @@ Days 1-8.
    finding is an artifact of that specific choice rather than a robust
    read of the price.
 
-Both are read, not asserted: if either attack had actually broken the
+3. **ROIC-anchor-window robustness** (:func:`roic_anchor_robustness_check`,
+   V14 in CRITIQUES.md). ``historical_median_roic`` anchors the whole
+   fade schedule on the full fiscal-year history - a third modeling
+   choice this module never varied, despite its own stated mandate to
+   test exactly this class of thing. GULFOILLUB's own realized ROIC has a
+   visible declining trend, so a recent trailing window could anchor the
+   schedule materially lower than the full history does. This reruns the
+   headline 10-year solve with the anchor built from only the most recent
+   fiscal years, and reports whether that changes the reachability
+   conclusion.
+
+All three are read, not asserted: if any attack had actually broken the
 headline finding, the fix belongs in ``REPORT.md``, not in this module
 weakening the check until it passes.
 """
@@ -121,6 +132,65 @@ def horizon_sensitivity(
     return result
 
 
+DEFAULT_ROIC_ANCHOR_WINDOWS = (3, 4, 5)
+
+
+def _implied_growth_or_ceiling(
+    target_price: float,
+    financials_path,
+    forecast_years: int,
+    *,
+    roic_anchor_years: int | None,
+) -> HorizonResult:
+    try:
+        g = implied_growth(
+            target_price, financials_path, forecast_years=forecast_years, roic_anchor_years=roic_anchor_years
+        )
+        return HorizonResult(growth=g, reachable=True, ceiling_price=None, ceiling_growth=None)
+    except PriceUnreachableError as exc:
+        return HorizonResult(
+            growth=None,
+            reachable=False,
+            ceiling_price=target_price + exc.best_price_gap,
+            ceiling_growth=exc.best_growth,
+        )
+
+
+def roic_anchor_robustness_check(
+    target_price: float,
+    financials_path=DEFAULT_FINANCIALS,
+    *,
+    forecast_years: int = 10,
+    windows: tuple[int, ...] = DEFAULT_ROIC_ANCHOR_WINDOWS,
+) -> dict:
+    """The headline ``forecast_years``-horizon reachability, full-history ROIC anchor vs. a recent trailing window.
+
+    V14 (CRITIQUES.md): no check existed for which fiscal years anchor
+    :func:`reverse_dcf.forward.historical_median_roic`, the third modeling
+    choice this module's own mandate names alongside base year
+    (:func:`base_year_robustness_check`) and forecast horizon
+    (:func:`horizon_sensitivity`). Mirrors ``base_year_robustness_check``'s
+    "recompute the headline figure under a different slice of history"
+    shape: a ``full_history`` baseline, one result per trailing window in
+    ``windows`` (via :func:`reverse_dcf.solve.implied_growth`'s
+    ``roic_anchor_years``), and whether any window flips the baseline's
+    reachability conclusion -- read, not assumed, the same restraint this
+    module's docstring states for the other two checks.
+    """
+    full_history = _implied_growth_or_ceiling(
+        target_price, financials_path, forecast_years, roic_anchor_years=None
+    )
+    by_window = {
+        years: _implied_growth_or_ceiling(target_price, financials_path, forecast_years, roic_anchor_years=years)
+        for years in windows
+    }
+    return {
+        "full_history": full_history,
+        "by_window": by_window,
+        "changes_reachability": any(r.reachable != full_history.reachable for r in by_window.values()),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ticker", default="GULFOILLUB")
@@ -150,6 +220,25 @@ def main() -> None:
                 f"ceiling Rs{r.ceiling_price:,.2f}/share at {r.ceiling_growth:+.2%} growth)"
             )
         print(f"   {years:>2}y horizon: implied growth {value}{marker}")
+
+    print("\n3. ROIC-anchor-window robustness (median ROIC from the full history vs. a recent trailing window):")
+    roic_anchor = roic_anchor_robustness_check(price, args.financials)
+
+    def _fmt(r: HorizonResult) -> str:
+        if r.reachable:
+            return f"{r.growth:+.2%}"
+        return (
+            "unreachable (no growth rate reproduces this price under this anchor -- "
+            f"ceiling Rs{r.ceiling_price:,.2f}/share at {r.ceiling_growth:+.2%} growth)"
+        )
+
+    print(f"   full history:        implied growth {_fmt(roic_anchor['full_history'])} <- base case")
+    for years, r in roic_anchor["by_window"].items():
+        print(f"   trailing {years}y anchor: implied growth {_fmt(r)}")
+    verdict = (
+        "CHANGES the reachability conclusion" if roic_anchor["changes_reachability"] else "does not change the reachability conclusion"
+    )
+    print(f"   -> anchoring on a recent window {verdict}")
 
 
 if __name__ == "__main__":

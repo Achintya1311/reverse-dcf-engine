@@ -233,6 +233,7 @@ def historical_median_roic(
     financials_path: str | Path = DEFAULT_FINANCIALS,
     *,
     ticker: str | None = None,
+    trailing_years: int | None = None,
 ) -> float:
     """Median of :func:`historical_roic_by_year`'s per-fiscal-year series.
 
@@ -245,8 +246,21 @@ def historical_median_roic(
     and the observation count when fewer than :data:`MIN_ROIC_OBSERVATIONS`
     year-over-year ROIC readings are available, rather than silently
     anchoring the whole fade schedule on a single historical year.
+
+    V14 (CRITIQUES.md): ``trailing_years``, when given, medians only the
+    most recent ``trailing_years`` year-over-year observations
+    (:func:`historical_roic_by_year` already returns them in fiscal-year
+    order) instead of the full history -- the anchor-window robustness
+    question :func:`reverse_dcf.grill.roic_anchor_robustness_check` exists
+    to answer. A window wider than the available history is the same as
+    no window at all; a window itself below :data:`MIN_ROIC_OBSERVATIONS`
+    still raises, the same guard applying regardless of whether the
+    thinness comes from the company's own short history or the caller's
+    own windowing choice.
     """
     roic_by_year = historical_roic_by_year(financials_path)
+    if trailing_years is not None:
+        roic_by_year = dict(list(roic_by_year.items())[-trailing_years:])
     if len(roic_by_year) < MIN_ROIC_OBSERVATIONS:
         label = f"{ticker}: " if ticker else ""
         raise ValueError(

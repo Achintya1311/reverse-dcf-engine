@@ -191,6 +191,7 @@ def implied_growth(
     roic_spread: float = TERMINAL_ROIC_SPREAD_DEFAULT,
     bracket: tuple[float, float] = GROWTH_BRACKET,
     ticker: str | None = None,
+    roic_anchor_years: int | None = None,
 ) -> float:
     """Solve the explicit-period revenue growth that reproduces ``target_price``.
 
@@ -211,6 +212,15 @@ def implied_growth(
     :mod:`reverse_dcf.sensitivity`'s reinvestment-rate shock both still use
     deliberately, since they are testing "what if this flat historical rate
     persisted" rather than the growth-consistent model.
+
+    V14 (CRITIQUES.md): ``roic_anchor_years``, passed through to
+    :func:`reverse_dcf.forward.historical_median_roic`'s own
+    ``trailing_years``, anchors the ROIC fade on only the most recent
+    ``roic_anchor_years`` fiscal years instead of the full history. Ignored
+    when ``reinvestment_rate`` is given (that path never reads
+    ``historical_median_roic`` at all). This is
+    :func:`reverse_dcf.grill.roic_anchor_robustness_check`'s own hook, the
+    same way ``forecast_years`` is :func:`reverse_dcf.grill.horizon_sensitivity`'s.
     """
     base = base_case_from_financials(
         financials_path,
@@ -234,7 +244,9 @@ def implied_growth(
         def price_gap(g: float) -> float:
             return run_dcf(replace(base, revenue_growth=g)).implied_share_price - target_price
     else:
-        median_roic = historical_median_roic(financials_path, ticker=ticker)
+        median_roic = historical_median_roic(
+            financials_path, ticker=ticker, trailing_years=roic_anchor_years
+        )
         roic_schedule = roic_fade_schedule(
             median_roic, terminal_roic(base.wacc, roic_spread), forecast_years, ticker=ticker
         )

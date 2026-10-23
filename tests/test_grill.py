@@ -1,8 +1,8 @@
 import pytest
 
 from reverse_dcf.forward import DEFAULT_FINANCIALS
-from reverse_dcf.grill import base_year_robustness_check, horizon_sensitivity
-from reverse_dcf.solve import MARKET_FIXTURES, load_market_price, solve
+from reverse_dcf.grill import base_year_robustness_check, horizon_sensitivity, roic_anchor_robustness_check
+from reverse_dcf.solve import MARKET_FIXTURES, implied_growth, load_market_price, solve
 
 
 def test_base_year_robustness_check_reports_both_cagrs():
@@ -110,6 +110,63 @@ def test_horizon_sensitivity_10y_ceiling_matches_day_5_solve():
     assert result[10].ceiling_growth == pytest.approx(base_case.growth_at_max_achievable_price_10y)
 
 
+def test_roic_anchor_robustness_check_returns_full_history_and_each_window():
+    # V14 (CRITIQUES.md): no robustness check existed for which years anchor
+    # historical_median_roic, the third modeling choice grill.py's own
+    # mandate names (alongside base year and forecast horizon). This is
+    # that third check, mirroring base_year_robustness_check's "compute the
+    # headline figure with vs. without a different slice of history" shape.
+    windows = (3, 4, 5)
+    reachable_price = 700.0
+    result = roic_anchor_robustness_check(reachable_price, DEFAULT_FINANCIALS, windows=windows)
+    assert set(result["by_window"]) == set(windows)
+    assert result["full_history"].reachable is True
+    assert all(result["by_window"][w].reachable for w in windows)
+
+
+def test_roic_anchor_robustness_check_matches_implied_growth_directly():
+    # Cross-check against implied_growth's own roic_anchor_years kwarg
+    # (test_solve.py) rather than re-deriving the windowed anchor with
+    # separate logic that could drift from it.
+    reachable_price = 700.0
+    result = roic_anchor_robustness_check(reachable_price, DEFAULT_FINANCIALS, windows=(3,))
+    direct = implied_growth(reachable_price, DEFAULT_FINANCIALS, roic_anchor_years=3)
+    assert result["by_window"][3].growth == pytest.approx(direct)
+
+
+def test_roic_anchor_robustness_check_moves_away_from_the_full_history_growth():
+    # GULFOILLUB's own realized ROIC has a visible declining trend (see
+    # test_forward.py), so a trailing window anchored on the most recent
+    # fiscal years must give a genuinely different growth rate from the
+    # full-history anchor, not the same number by construction.
+    reachable_price = 700.0
+    result = roic_anchor_robustness_check(reachable_price, DEFAULT_FINANCIALS, windows=(3, 4, 5))
+    full = result["full_history"]
+    for years in (3, 4, 5):
+        assert result["by_window"][years].growth != pytest.approx(full.growth)
+
+
+def test_roic_anchor_robustness_check_does_not_change_the_real_reachability_conclusion():
+    # The actual Day 65 finding: at GULFOILLUB's own committed market
+    # price, the headline 10-year conclusion is already "unreachable" under
+    # the full-history anchor (test_solve.py). Anchoring on a recent window
+    # instead (lower median ROIC, see test_forward.py) makes reinvestment
+    # more expensive per unit of growth, which only pushes the ceiling
+    # further from the target -- it does not flip "unreachable" to
+    # "reachable" for this company's own numbers. Reported honestly either
+    # way, not assumed.
+    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
+    result = roic_anchor_robustness_check(market.price, DEFAULT_FINANCIALS)
+    assert result["full_history"].reachable is False
+    assert all(not r.reachable for r in result["by_window"].values())
+    assert result["changes_reachability"] is False
+    # Each window's ceiling must fall strictly further short of the target
+    # than the full-history ceiling, not just differ from it.
+    full_gap = market.price - result["full_history"].ceiling_price
+    for r in result["by_window"].values():
+        assert market.price - r.ceiling_price > full_gap
+
+
 def test_cli_runs_end_to_end_against_the_committed_fixtures(monkeypatch, capsys):
     import sys
 
@@ -120,3 +177,4 @@ def test_cli_runs_end_to_end_against_the_committed_fixtures(monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "Base-year robustness" in out
     assert "Forecast-horizon robustness" in out
+    assert "ROIC-anchor" in out

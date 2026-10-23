@@ -296,6 +296,42 @@ def test_historical_median_roic_leaves_gulf_oils_own_base_case_unaffected():
     assert median_roic == pytest.approx(0.2589, abs=0.01)
 
 
+def test_historical_median_roic_trailing_window_differs_from_the_full_history():
+    # V14 (CRITIQUES.md): GULFOILLUB's own realized ROIC has a visible
+    # declining trend (FY2015-16 27.16% down to FY2023-24 23.02%), so a
+    # trailing window anchored on only the most recent fiscal years must
+    # land below the full 9-observation median (25.89%) -- reproducing
+    # V14's own evidence (full median vs. trailing-3-year figure).
+    full_history = historical_median_roic(DEFAULT_FINANCIALS)
+    trailing_3y = historical_median_roic(DEFAULT_FINANCIALS, trailing_years=3)
+    assert full_history == pytest.approx(0.2589, abs=0.001)
+    assert trailing_3y == pytest.approx(0.2288, abs=0.001)
+    assert trailing_3y < full_history
+
+
+def test_historical_median_roic_trailing_window_still_enforces_the_minimum_observations(tmp_path):
+    path = tmp_path / "two_year.csv"
+    path.write_text(_TWO_YEAR_FINANCIALS)
+    # A window request that is itself below MIN_ROIC_OBSERVATIONS must raise
+    # the same way an unwindowed too-thin history already does -- the floor
+    # exists to stop a "median" of fewer than 3 points, regardless of
+    # whether that thinness comes from the company's own short history or
+    # from the caller's own windowing choice.
+    with pytest.raises(ValueError, match=r"(?i)roic"):
+        historical_median_roic(DEFAULT_FINANCIALS, trailing_years=2)
+    with pytest.raises(ValueError, match=r"(?i)roic"):
+        historical_median_roic(path, trailing_years=3)
+
+
+def test_historical_median_roic_trailing_window_wider_than_history_is_the_same_as_unwindowed():
+    # GULFOILLUB only has 9 year-over-year observations; asking for a
+    # trailing window wider than that must behave exactly like no window at
+    # all, not raise or silently truncate to something else.
+    assert historical_median_roic(DEFAULT_FINANCIALS, trailing_years=50) == pytest.approx(
+        historical_median_roic(DEFAULT_FINANCIALS)
+    )
+
+
 def test_reinvestment_schedule_from_growth_still_divides_normally_once_the_fade_is_safe():
     schedule = roic_fade_schedule(median_roic=0.20, terminal_roic_value=0.10, forecast_years=4)
     reinvestment = reinvestment_schedule_from_growth(0.05, schedule)

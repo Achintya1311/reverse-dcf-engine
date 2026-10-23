@@ -352,6 +352,16 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   live market-price fixture, so a future change to `roic_fade_schedule`/`terminal_roic` can't
   silently drift them unnoticed, the same protection every other number in this README already
   has.
+- **`historical_median_roic`'s anchor window was untested until Day 65 (CRITIQUES.md V14).**
+  GULFOILLUB's own realized ROIC has a visible declining trend (FY2015-16 27.16% down to
+  FY2023-24 23.02%), so the full 9-observation median (25.89%) sits above a recent trailing
+  window's own median — `reverse_dcf.grill.roic_anchor_robustness_check` now reruns the
+  headline 10-year reachability at trailing 3/4/5-year windows (via `implied_growth`'s new
+  `roic_anchor_years=`) and reports, honestly either way, whether the "unreachable at today's
+  price" conclusion changes. For the real market price it does not: a recent window's lower
+  ROIC only drops the 10-year ceiling further (~₹885 vs. the full-history ~₹914.55), making the
+  conclusion more robust, not less. `python -m reverse_dcf.grill` prints this as a third check
+  alongside base-year and forecast-horizon robustness.
 - **Resolved for GULFOILLUB's own numbers in v3, not by changing the code (CRITIQUES.md V7):**
   `_solve_growth` still carries its defensive two-root tie-break (documented in its own
   docstring), but v3's fix removed the mechanism that made price non-monotonic in growth for

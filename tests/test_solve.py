@@ -4,7 +4,15 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from reverse_dcf.forward import DEFAULT_FINANCIALS, base_case_from_financials, run_dcf, terminal_roic
+from reverse_dcf.forward import (
+    DEFAULT_FINANCIALS,
+    base_case_from_financials,
+    historical_median_roic,
+    reinvestment_schedule_from_growth,
+    roic_fade_schedule,
+    run_dcf,
+    terminal_roic,
+)
 from reverse_dcf.solve import (
     MARKET_FIXTURES,
     PriceUnreachableError,
@@ -81,6 +89,32 @@ def test_implied_growth_honors_margin_and_reinvestment_overrides():
     # FCFF per unit of revenue growth relative to V2's growth-scaled
     # schedule, so less growth is needed to reach the same price.
     assert overridden_g < base_g
+
+
+def test_implied_growth_honors_a_trailing_roic_anchor_window():
+    # V14 (CRITIQUES.md): reverse_dcf.grill.roic_anchor_robustness_check
+    # needs implied_growth to anchor the ROIC fade on a recent trailing
+    # window, not just the full history, so it can rerun the headline
+    # 10-year reachability check under that alternative anchor. GULFOILLUB's
+    # own trailing-3-year median ROIC (~22.88%) sits below the full-history
+    # one (~25.89% -- see test_forward.py), which makes reinvestment more
+    # expensive per unit of growth, so the windowed anchor needs *more*
+    # growth to reach the same price.
+    target_price = REACHABLE_BY_BOTH_MODELS
+    full_history_g = implied_growth(target_price, DEFAULT_FINANCIALS)
+    windowed_g = implied_growth(target_price, DEFAULT_FINANCIALS, roic_anchor_years=3)
+    assert windowed_g != pytest.approx(full_history_g)
+    assert windowed_g > full_history_g
+
+    # The windowed growth rate must still round-trip through the same
+    # windowed ROIC anchor, the same "Done when" gate the unwindowed case
+    # already gets in test_implied_growth_round_trips_through_the_forward_engine.
+    median_roic = historical_median_roic(DEFAULT_FINANCIALS, trailing_years=3)
+    base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=0.0, forecast_years=10)
+    roic_schedule = roic_fade_schedule(median_roic, terminal_roic(base.wacc), forecast_years=10)
+    schedule = reinvestment_schedule_from_growth(windowed_g, roic_schedule)
+    result = run_dcf(replace(base, revenue_growth=windowed_g, reinvestment_rate=schedule))
+    assert result.implied_share_price == pytest.approx(target_price, abs=0.01)
 
 
 def test_perpetual_breakeven_growth_round_trips():
