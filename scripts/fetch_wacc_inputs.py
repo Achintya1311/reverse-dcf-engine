@@ -8,15 +8,17 @@ ERP, industry beta and risk-free-rate inputs when Damodaran's annual
 update or a new FRED observation lands.
 
 Needs `requests` and `xlrd` (for Damodaran's legacy .xls files) - neither
-is in requirements.txt because nothing at runtime imports them. Install
-both ad hoc (`pip install requests xlrd`) before running this script.
+is in requirements.txt because nothing at runtime imports them. Both are
+declared as the optional `fetch` extra (`pip install -e ".[fetch]"`).
+.github/workflows/fetch-wacc-inputs.yml runs this monthly (hub D29).
 
 Usage:
-    python scripts/fetch_wacc_inputs.py
+    python scripts/fetch_wacc_inputs.py [--out-dir DIR]
 """
 
 from __future__ import annotations
 
+import argparse
 import io
 import re
 import sys
@@ -111,7 +113,24 @@ def verify_industry_classification() -> str:
     return str(match.iloc[0]["Industry Group"])
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Re-fetch the three WACC input fixtures (India 10Y G-Sec yield from FRED, "
+            "Damodaran's India country risk premium and industry beta) from live sources."
+        )
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=OUT,
+        help="directory to write the three CSVs to (default: fixtures/wacc)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    out_dir = build_parser().parse_args(argv).out_dir
     fetched_date = pd.Timestamp.now().date().isoformat()
 
     classification = verify_industry_classification()
@@ -121,10 +140,11 @@ def main() -> None:
             f"not {INDUSTRY!r} - update INDUSTRY and research/wacc_sources.md before refreshing fixtures."
         )
 
-    fetch_india_erp(fetched_date).to_csv(OUT / "india_country_risk_premium.csv", index=False)
-    fetch_industry_beta(fetched_date).to_csv(OUT / "india_industry_beta.csv", index=False)
-    fetch_risk_free_rate(fetched_date).to_csv(OUT / "india_10y_gsec_yield.csv", index=False)
-    print(f"fixtures/wacc/*.csv refreshed from live sources ({fetched_date})")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fetch_india_erp(fetched_date).to_csv(out_dir / "india_country_risk_premium.csv", index=False)
+    fetch_industry_beta(fetched_date).to_csv(out_dir / "india_industry_beta.csv", index=False)
+    fetch_risk_free_rate(fetched_date).to_csv(out_dir / "india_10y_gsec_yield.csv", index=False)
+    print(f"{out_dir}/*.csv refreshed from live sources ({fetched_date})")
 
 
 if __name__ == "__main__":

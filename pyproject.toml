@@ -13,6 +13,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# scripts/fetch_wacc_inputs.py only; nothing at runtime imports these.
+fetch = ["requests", "xlrd"]
 
 [build-system]
 requires = ["setuptools>=68"]
