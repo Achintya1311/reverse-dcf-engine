@@ -42,7 +42,7 @@ def test_load_india_erp_matches_damodaran_fixture():
 
 
 def test_load_risk_free_rate_matches_latest_fred_observation():
-    assert load_risk_free_rate() == pytest.approx(0.0689)
+    assert load_risk_free_rate() == pytest.approx(0.0706)
 
 
 def test_load_industry_beta_is_gulf_oils_damodaran_classification():
@@ -148,9 +148,10 @@ def test_compute_wacc_matches_the_pinned_gulfoillub_value():
     # V10/V11 (CRITIQUES.md): the zero-debt and negative-book-equity guards
     # added below must not move GULFOILLUB's own real WACC (positive debt,
     # positive book equity) at all -- pinned byte-identical to the value
-    # computed before those guards existed.
+    # computed before those guards existed. Re-pinned on Day 101 (D29) to the
+    # 2026-10-25 WACC fixtures (risk-free 6.89% -> 7.06%).
     result = compute_wacc(DEFAULT_FINANCIALS)
-    assert result.wacc == pytest.approx(0.11610477172909299, rel=1e-12)
+    assert result.wacc == pytest.approx(0.11756184381039692, rel=1e-12)
 
 
 # --- V10: zero-debt issuer --------------------------------------------------

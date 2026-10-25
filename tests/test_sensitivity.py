@@ -162,13 +162,14 @@ def test_roic_spread_pins_the_readme_worked_numbers():
     # hand, with no test pinning them -- unlike every other number this
     # project publishes (its own evidence cell). Pin both so a future change
     # to roic_fade_schedule/terminal_roic can't silently drift them: spread
-    # 0% (today's default) stays unreachable with a ~914.55 ceiling; spread
+    # 0% (today's default) stays unreachable with a ~904.98 ceiling (~914.55
+    # before Day 101's WACC refresh); spread
     # 2% (the modest shock sensitivity_table's new roic_spread row now also
     # exercises) flips to reachable at ~+11% implied growth.
     market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
     at_default = solve(market.price, DEFAULT_FINANCIALS, roic_spread=0.0)
     assert at_default.price_reachable is False
-    assert at_default.max_achievable_price_10y == pytest.approx(914.55, abs=0.5)
+    assert at_default.max_achievable_price_10y == pytest.approx(904.98, abs=0.5)
 
     at_plus_2pp = solve(market.price, DEFAULT_FINANCIALS, roic_spread=0.02)
     assert at_plus_2pp.price_reachable is True

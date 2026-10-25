@@ -4,7 +4,7 @@ Educational research on historical data. Not investment advice. Not a SEBI-regis
 
 **Question:** at a given share price, what growth, margin and reinvestment does a textbook-consistent reverse DCF say must be assumed — and is that combination even reachable under the model?
 **Method:** derive reinvestment from growth via ROIC (`growth = reinvestment × ROIC`, ROIC fading from the 10-year median realized value to WACC) instead of holding one historical fiscal year's reinvestment rate fixed, then solve for the constant growth rate that reproduces the price. The terminal year now satisfies the same identity at its own (slower) terminal growth, not the explicit period's.
-**Finding (v3):** no constant growth rate reproduces the committed price at all — the model's own ceiling is ₹914.55/share (10-year framing) or ₹715.52/share (perpetual framing), both below it, and v3's terminal-value fix *lowers* the 10-year ceiling further from v2's own (overstated) ₹962.08. See "The headline v3 finding" below.
+**Finding (v3):** no constant growth rate reproduces the committed price at all — the model's own ceiling is ₹904.98/share (10-year framing) or ₹708.41/share (perpetual framing), both below the ₹1,039.00 price of 2026-10-25, at an 11.76% WACC from the 2026-10-25 WACC fixtures. v3's terminal-value fix *lowered* the 10-year ceiling from v2's own (overstated) ₹962.08 to ₹914.55 at the WACC of the time (11.61%). See "The headline v3 finding" below.
 **Chart:** `outputs/tornado.png` — the five-assumption sensitivity tornado (WACC, terminal growth, EBIT margin, reinvestment rate, terminal ROIC spread).
 **Reproduce:** `python -m reverse_dcf.solve`
 
@@ -99,6 +99,8 @@ rate persisted" as a separate, simpler scenario.
 | Perpetual breakeven growth at ₹1,066.00/share | **3.52%** | **Unreachable.** Ceiling **₹715.52/share** (growth → WACC, 11.61%) | **Unchanged — ₹715.52/share.** The perpetual model has no separate terminal year (forecast_years=1 collapses explicit and terminal into the same year), so V6's bug never applied to it |
 | Price vs. growth shape (10-year) | Monotonically increasing (higher growth always meant a higher price) | Not monotonic for GULFOILLUB's own assumptions - rises then falls, since the old terminal formula let the terminal value fall as the *explicit* reinvestment rate it inherited rose with growth (V7's two-root case); see `reverse_dcf.solve._solve_growth` | Monotonically increasing again, at least across GULFOILLUB's full feasible bracket (−99% to the ROIC-fade schedule's own floor) — the terminal value no longer depends on the explicit growth rate at all, removing the mechanism that caused the hump. V7's defensive tie-break code is unchanged and still runs (not proven monotonic for every ticker/price), but it is not hit by this company's own numbers any more |
 
+The table's figures are as solved at the time of each version (11.61% WACC, 6.89% risk-free rate, ₹1,066.00 price). Against the 2026-10-25 WACC fixtures (7.06% risk-free rate, 11.76% WACC and terminal growth 7.06%) and the ₹1,039.00 price of 2026-10-25, v3's ceilings are **₹904.98/share** (10-year, +11.76% growth) and **₹708.41/share** (perpetual), both still below the price.
+
 ### The headline v2 finding: today's price is unreachable, not just "pricing in decline"
 
 v1's "-0.49% implied CAGR" read as "the market is pricing in flat-to-declining revenue" - a
@@ -108,7 +110,7 @@ is forced to scale with growth at a ROIC no better than Gulf Oil's own 10-year m
 its cost of capital, **no constant growth rate - positive, negative, or zero - produces a
 10-year-model price above ₹962.08/share** (v2's own figure; v3 below revises this ceiling
 down further) **or a perpetual-model price above ₹715.52/share.**
-Today's actual price (₹1,066.00) exceeds both ceilings. `reverse_dcf.solve.implied_growth`
+The price at the time (₹1,066.00) exceeded both ceilings, and so does the ₹1,039.00 of 2026-10-25 (v3 ceilings ₹904.98/₹708.41). `reverse_dcf.solve.implied_growth`
 and `perpetual_breakeven_growth` both raise `PriceUnreachableError` rather than returning a
 number pretending otherwise; `solve()` catches it and reports `price_reachable=False` plus
 each ceiling (`max_achievable_price_10y`/`_perpetual` and the growth rate that achieves it)
@@ -164,8 +166,8 @@ assumptions, cannot move the total value — the split is only an accounting dev
 
 **The result is worse, not better, for the bull case — reported honestly either way (PLAN.md
 rule 5).** Fixing the bug *lowers* the 10-year ceiling, from v2's ₹962.08 to **₹914.55** (the
-old number was itself inflated by the free lunch this fix removes), widening the gap to today's
-₹1,066.00 price from ₹104 to ₹151 short. The perpetual model is untouched (₹715.52, unchanged) —
+old number was itself inflated by the free lunch this fix removes), widening the gap to the then
+₹1,066.00 price from ₹104 to ₹151 short (both ceilings at the then 11.61% WACC). The perpetual model is untouched (₹715.52, unchanged) —
 it has no separate terminal year, since `forecast_years=1` already collapses explicit and
 terminal into the same year (`roic_fade_schedule`'s own docstring).
 
@@ -176,7 +178,7 @@ raising the possibility of two valid roots for the same target price
 that). Under v3, the terminal value no longer depends on the *explicit* growth rate at all —
 only on the fixed `terminal_growth`/`terminal_ROIC` pair — which removes the mechanism that
 made price turn down at high growth. Sampling the full feasible bracket for GULFOILLUB's base
-case (-99% to the ROIC-fade schedule's own floor, ~11.61%) now shows price rising
+case (-99% to the ROIC-fade schedule's own floor, ~11.76% at the 2026-10-25 WACC) now shows price rising
 monotonically throughout, so no price in that range has two roots any more. `_solve_growth`'s
 tie-break code is left in place, deliberately: monotonicity is an empirical property of this
 company's own numbers today, not a proof for every ticker, price, or future fiscal year, and
@@ -330,13 +332,15 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   `terminal_growth / terminal_ROIC`) — see "v3: the terminal year pays its own reinvestment
   cost" above for the full mechanism, the regression test
   (`test_terminal_value_is_continuous_across_the_explicit_terminal_boundary`), and the revised
-  ceiling (₹914.55, down from v2's own inflated ₹962.08).
+  ceiling (₹914.55, down from v2's own inflated ₹962.08, both at the then 11.61% WACC; ₹904.98 at the
+  2026-10-25 WACC of 11.76%).
 - **The terminal ROIC spread (default 0, i.e. terminal ROIC = WACC) is a generic,
-  stated convention, not a company-specific estimate - and the "unreachable at ₹1,066"
+  stated convention, not a company-specific estimate - and the "unreachable at ₹1,039"
   finding is sensitive to it, more so after v3's fix.** Probing spread values directly
   (reproducible via `roic_spread=` on any `reverse_dcf.solve` function):
-  spread 0% → 10-year ceiling ₹914.55 (unreachable); spread 2% → reachable at 11.21% growth;
-  spread 5% → reachable at 8.08% growth; spread 10% → reachable at 5.87% growth. v3's fix makes
+  spread 0% → 10-year ceiling ₹904.98 (unreachable); spread 2% → reachable at 11.02% growth;
+  spread 5% → reachable at 7.88% growth; spread 10% → reachable at 5.66% growth (₹1,039.00 price and
+  2026-10-25 WACC fixtures). v3's fix makes
   reachability flip at a *smaller* spread than v2 reported (v2: still unreachable even at a 10%
   spread, ceiling ₹1,134) — correctly sharper, since v2's own ceiling was itself inflated by the
   bug v3 fixes. A spread that large would be a claim that Gulf Oil keeps a durable
@@ -348,7 +352,7 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   where reachability flips — see `ROIC_SPREAD_SHOCK`'s docstring for why that size, not a
   historical std-dev like the other rows), and
   `tests/test_sensitivity.py::test_roic_spread_pins_the_readme_worked_numbers` pins the 0%
-  (unreachable, ~₹914.55 ceiling) and +2% (reachable, ~+11% growth) cases directly against the
+  (unreachable, ~₹904.98 ceiling) and +2% (reachable, ~+11% growth) cases directly against the
   live market-price fixture, so a future change to `roic_fade_schedule`/`terminal_roic` can't
   silently drift them unnoticed, the same protection every other number in this README already
   has.
@@ -359,7 +363,7 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   headline 10-year reachability at trailing 3/4/5-year windows (via `implied_growth`'s new
   `roic_anchor_years=`) and reports, honestly either way, whether the "unreachable at today's
   price" conclusion changes. For the real market price it does not: a recent window's lower
-  ROIC only drops the 10-year ceiling further (~₹885 vs. the full-history ~₹914.55), making the
+  ROIC only drops the 10-year ceiling further (~₹875 vs. the full-history ~₹904.98 at the 2026-10-25 WACC), making the
   conclusion more robust, not less. `python -m reverse_dcf.grill` prints this as a third check
   alongside base-year and forecast-horizon robustness.
 - **Resolved for GULFOILLUB's own numbers in v3, not by changing the code (CRITIQUES.md V7):**
@@ -368,7 +372,8 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   this company's assumptions — see "v3" above. The tie-break is left in place as a fallback,
   not proven impossible for every ticker or future price.
 - **Fixed on Day 90 (CRITIQUES.md S5, P14): `REPORT.md` (Day 8's write-up) no longer quotes
-  v1's numbers.** It now states the v3 "unreachable" conclusion (ceilings ₹914.55/₹715.52) in
+  v1's numbers.** It now states the v3 "unreachable" conclusion (ceilings ₹914.55/₹715.52, at the then
+  11.61% WACC; not yet regenerated against the 2026-10-25 WACC fixtures) in
   the same method-output framing this README's own Findings section uses, regenerated by
   actually running `solve`, `compare`, `sensitivity` and `grill` against the then-current
   committed price. `outputs/REPORT.pdf` is `.gitignore`d and regenerated locally by whoever runs
@@ -413,7 +418,7 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   not a rounding error. Day 1's shortlist noted an approximate market cap of
   ₹5,600–5,800 cr for Gulf Oil; once Day 5 needs a precise current price for the
   reverse solve anyway, it would be worth rerunning WACC at market weights and
-  checking how much the 11.61% figure moves.
+  checking how much the 11.76% figure moves.
 - **The relevered beta is a Hamada-formula estimate, not a directly measured
   company beta.** It unlevers Damodaran's `Chemical (Basic)` India industry
   average and relevers it to Gulf Oil's own FY2023-24 debt and tax rate. Hamada
@@ -421,11 +426,15 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   levered beta for a company whose cost of debt (7.75% pre-tax, see
   `research/wacc_sources.md`) is well above the risk-free rate - Gulf Oil's debt
   isn't actually riskless.
-- **The 6.89% risk-free rate lags today.** FRED's India 10-year G-Sec series
-  (`INDIRLTLT01STM`) was last updated for 2026-06-01 as of this fetch
-  (2026-09-11) - a two-to-three-month reporting lag typical of this series, not
-  a stale-data mistake, but a real gap between "the rate used" and "the rate
-  today" worth keeping in mind if Indian yields have moved meaningfully since.
+- **The 7.06% risk-free rate lags today.** FRED's India 10-year G-Sec series
+  (`INDIRLTLT01STM`) was last updated for 2026-09-01 as of the 2026-10-25 refresh -
+  a one-to-two-month reporting lag typical of this series, not a stale-data
+  mistake, but a real gap between "the rate used" and "the rate today".
+  `.github/workflows/fetch-wacc-inputs.yml` re-fetches it monthly since Day 100
+  (CRITIQUES.md D29). Because terminal growth defaults to the same rate, each
+  refresh moves WACC and terminal growth together: the 2026-10-25 refresh
+  (6.89% → 7.06%) raised WACC from 11.61% to 11.76% and lowered the 10-year
+  ceiling from ₹914.55 to ₹904.98 and the perpetual one from ₹715.52 to ₹708.41.
 - **The forward DCF is single-stage-plus-terminal, and margin/reinvestment
   are frozen at one fiscal year's actuals.** `reverse_dcf/forward.py` grows
   revenue at one constant rate for the whole explicit forecast, then a
@@ -452,9 +461,9 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
 - **The market price the reverse solver targets is a single live snapshot,
   not a robust estimate.** `fixtures/market/GULFOILLUB.csv` is refreshed weekly by
   Day 32's `.github/workflows/fetch-market-price.yml` and currently holds the price
-  fetched from screener.in on 2026-10-19 (₹1,066/share) - a ~7-9% move from Day 1's
-  ~₹1,140-1,180 shortlist-day note and a smaller move from the ₹1,061.00 this README's
-  prose was solved against before Day 91's regeneration. Re-running
+  fetched from screener.in on 2026-10-25 (₹1,039.00/share) - a ~9-12% move from Day 1's
+  ~₹1,140-1,180 shortlist-day note and a smaller move from the ₹1,066.00 this README's
+  prose was solved against at Day 91's regeneration. Re-running
   `scripts/fetch_market_price.py` on a different day will move the implied
   growth number and the exact gap to each ceiling, sometimes by more than the
   underlying investment thesis changed. The *reachability* conclusion (neither
@@ -462,15 +471,16 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   to the day's fetch than a point-estimate implied-growth figure would be, but the
   exact percentage should not be quoted to two decimal places in the write-up.
 - **This README's own live Findings/Limitations prose is regenerated by hand, not
-  automatically, each time the price fixture refreshes (D28, fixed Day 91).**
-  `fetch-market-price.yml`/`fetch-peer-comparables.yml` commit refreshed fixtures on
+  automatically, each time the price or WACC fixtures refresh (D28, fixed Day 91; D29, Day 101).**
+  `fetch-market-price.yml`/`fetch-peer-comparables.yml`/`fetch-wacc-inputs.yml` commit refreshed fixtures on
   their own schedule with no routine re-deriving this prose on every such commit, so
-  the exact price/date quoted above is as of this file's last regeneration (Day 91,
-  against the then-current ₹1,066.00/2026-10-19 fixture), not necessarily the latest
+  the exact price/date quoted above is as of this file's last regeneration (Day 101,
+  against the ₹1,039.00/2026-10-25 price fixture and the 2026-10-25 WACC fixtures), not necessarily the latest
   value `fixtures/market/GULFOILLUB.csv` holds by the time a reader checks it - rerun
   `python -m reverse_dcf.solve` for the live number. The "unreachable" conclusion and
-  both ceilings (₹914.55/₹715.52) are unaffected by this kind of drift, since neither
-  depends on the target price itself.
+  both ceilings (₹904.98/₹708.41) are unaffected by price drift, since neither
+  depends on the target price itself, but both ceilings move with each WACC refresh
+  (see the risk-free-rate bullet above).
 - **The base-case margin is frozen at one fiscal year's actual** (reinvestment
   no longer is, as of v2 - see above). `reverse_dcf/solve.py`'s sensitivity
   grid (`--grid`) still deliberately sweeps Gulf Oil's own nine historically
