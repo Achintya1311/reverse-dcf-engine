@@ -60,3 +60,12 @@ jobs:
           git commit -m "data: refresh peer comparables fixture ($(date -u +%Y-%m-%d))"
           git pull --rebase origin main
           git push
+
+      - name: Tests on the refreshed fixtures (D47)
+        # A push made with GITHUB_TOKEN does not start ci.yml, so this is the
+        # only run that sees the new fixtures. A refresh that outdates
+        # REPORT.md or the README (tests/test_report_numbers.py) turns this
+        # run red instead of leaving main silently failing.
+        run: |
+          pip install -e ".[dev]"
+          pytest -q
