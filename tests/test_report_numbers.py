@@ -38,3 +38,12 @@ def test_report_tables_quote_the_current_wacc_and_ceiling_growth():
     assert f"| Perpetual breakeven | **Unreachable** | **₹{contract['max_achievable_price_perpetual']:,.2f}/share** | +{growth:.2%} |" in text
     assert f"| WACC | {wacc.wacc:.2%} |" in text
     assert f"| Terminal growth | {wacc.risk_free_rate:.2%} |" in text
+
+
+def test_readme_quotes_the_committed_price_and_its_date():
+    # D46: the 26 Oct fixture refresh left the README on the 25 Oct price.
+    text = (REPORT.parent / "README.md").read_text()
+    market, _ = _result()
+    lead = next(line for line in text.splitlines() if line.startswith("**Finding"))
+    assert f"₹{market.price:,.2f} price of {market.date}" in lead
+    assert f"on {market.date} (₹{market.price:,.2f}/share)" in text
