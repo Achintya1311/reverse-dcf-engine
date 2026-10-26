@@ -10,7 +10,7 @@ Educational research on historical data. Not investment advice. Not a SEBI-regis
 
 Takes a share price as given and solves for the growth, margin and reinvestment the market must already believe — then asks whether those assumptions are plausible.
 
-**Status:** v3 (17 Oct 2026): the terminal year now reinvests at a rate consistent with terminal growth itself, not the explicit period's growth (CRITIQUES.md V6/V7, Day 18). v2 (16 Oct 2026): reinvestment is derived from growth via ROIC, not held fixed at one historical fiscal year's rate. Part of a nine-repo equity research pipeline; [STOCKSTALKER](https://github.com/Achintya1311/STOCKSTALKER) is the front door.
+**Status:** v3 (17 Oct 2026): the terminal year now reinvests at a rate consistent with terminal growth itself, not the explicit period's growth (CRITIQUES.md V6/V7, Day 18). v2 (16 Oct 2026): reinvestment is derived from growth via ROIC, not held fixed at one historical fiscal year's rate. Part of an eight-repo equity research pipeline (STOCKSTALKER plus seven research repos; the separate stockstalker-lab is not counted); [STOCKSTALKER](https://github.com/Achintya1311/STOCKSTALKER) is the front door.
 
 *Educational research on historical data. Not investment advice. Not a SEBI-registered research analyst.*
 
@@ -576,7 +576,7 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
 
 ## Where this sits
 
-Part of a nine-repo research pipeline. Stock Stalker screens the NSE universe; this repo publishes a versioned artifact it reads back. This is the real shape as of Day 31 (P27) -- regenerated from `python -m reverse_dcf.solve --contract <path>` against the committed GULFOILLUB fixture, not a hand-written illustration (the pre-V2 example this replaced hadn't matched `to_contract()`'s actual output since v0.7, and its three populated keys are in fact `null` for today's real ticker and price):
+Part of an eight-repo research pipeline. Stock Stalker screens the NSE universe; this repo publishes a versioned artifact it reads back. This is the real shape as of Day 31 (P27) -- regenerated from `python -m reverse_dcf.solve --contract <path>` against the committed GULFOILLUB fixture, not a hand-written illustration (the pre-V2 example this replaced hadn't matched `to_contract()`'s actual output since v0.7, and its three populated keys are in fact `null` for today's real ticker and price):
 
 ```json
 {
