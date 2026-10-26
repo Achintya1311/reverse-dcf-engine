@@ -539,3 +539,34 @@ def test_contract_carries_the_dated_keys_additively():
     assert block["price_reachable_dated"] is True
     assert block["max_achievable_price_10y_dated"] == pytest.approx(1110.4, abs=0.5)
     assert 0 < block["implied_cagr_dated"] < block["growth_at_max_achievable_price_10y"]
+
+
+# -- Day 151 (V19, V20): what the perpetual framing can show at the default spread --
+
+
+def _perpetual_result(g: float):
+    base = base_case_from_financials(DEFAULT_FINANCIALS, revenue_growth=g, forecast_years=1)
+    rate = g / terminal_roic(base.wacc)
+    return run_dcf(replace(base, terminal_growth=g, reinvestment_rate=[rate], terminal_reinvestment_rate=rate))
+
+
+@pytest.mark.parametrize("g", [0.0, 0.03, 0.06, 0.09, 0.11, 0.1175])
+def test_perpetual_value_is_next_years_nopat_over_wacc_at_zero_spread(g):
+    # ROIC = WACC makes growth value-neutral: EV = NOPAT(1+g)/WACC for any g (V19).
+    result = _perpetual_result(g)
+    a = result.assumptions
+    nopat_next_year = a.revenue_base * (1 + g) * a.ebit_margin * (1 - a.tax_rate)
+    assert result.enterprise_value == pytest.approx(nopat_next_year / a.wacc, rel=1e-9)
+
+
+def test_perpetual_price_spans_only_the_one_year_growth_factor():
+    low, high = _perpetual_result(0.0).implied_share_price, _perpetual_result(0.1175).implied_share_price
+    assert low == pytest.approx(641.87, abs=0.01)
+    assert high == pytest.approx(708.38, abs=0.01)
+
+
+def test_readme_limitations_agree_with_the_perpetual_vs_ten_year_test():
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    assert "so it is always the lower,\n  more conservative of the two" not in readme
+    assert "test_perpetual_breakeven_growth_is_higher_than_the_ten_year_implied_growth" in readme
+    assert "NOPAT × (1 + g) / WACC" in readme

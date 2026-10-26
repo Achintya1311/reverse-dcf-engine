@@ -134,6 +134,13 @@ Price is still rising at the cap: on the 2026-10-25 fixtures it is about ₹862 
 "unreachable" means unreachable for any growth rate the business can fund from its own returns. The
 terminal ROIC spread (V13, Limitations) raises that bound, which is why a 2% spread makes the price reachable.
 
+**What the perpetual ceiling measures (V19).** At the default zero spread, terminal ROIC equals WACC, so new growth
+earns exactly its cost of capital and adds no value. The perpetual model's enterprise value is then NOPAT × (1 + g) / WACC
+for any growth rate g (pinned by `tests/test_solve.py::test_perpetual_value_is_next_years_nopat_over_wacc_at_zero_spread`):
+₹641.87/share at 0% growth, ₹675.84 at 6% and ₹708.38 at 11.75%, against the ₹708.41 ceiling. So the perpetual
+"unreachable" says the price is above the value of FY2023-24 NOPAT grown one year and capitalised at WACC, plus net cash.
+It is not a statement about how much growth the price needs; a positive spread (V13) is what lets growth add value.
+
 One more V1-era intuition v2 overturns, and v3 leaves overturned (with revised numbers): V1
 guaranteed perpetual breakeven growth was always *lower* than the 10-year implied growth (a
 longer explicit high-growth window always "cost" more). V2/v3 flip this for any price both
@@ -514,8 +521,12 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   are not the same number by design.** The former assumes 10 years of the
   quoted growth rate followed by a slower terminal decay (matching the
   forward engine's existing shape); the latter assumes the same growth rate
-  holds forever with no deceleration at all, so it is always the lower,
-  more conservative of the two. Reporting only one of them in Day 8's
+  holds forever with no deceleration at all. Under v1 that made it the
+  lower, more conservative of the two; under v2/v3 it is the higher of the
+  two for any price both models reach
+  (`tests/test_solve.py::test_perpetual_breakeven_growth_is_higher_than_the_ten_year_implied_growth`,
+  V20), and at the default zero spread it barely depends on growth at all
+  (V19, above). Reporting only one of them in Day 8's
   write-up would overstate or understate how demanding the market's
   assumption really is - both belong in the final note.
 - **The peer set is three companies, chosen for being recognizable
