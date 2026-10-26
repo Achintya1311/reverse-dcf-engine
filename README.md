@@ -446,9 +446,14 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   liability (trade payables, provisions, deferred tax) into "equity". That
   overstates book equity and therefore understates the debt weight - a real bias,
   not a rounding error. Day 1's shortlist noted an approximate market cap of
-  ₹5,600–5,800 cr for Gulf Oil; once Day 5 needs a precise current price for the
-  reverse solve anyway, it would be worth rerunning WACC at market weights and
-  checking how much the 11.76% figure moves.
+  ₹5,600–5,800 cr for Gulf Oil. **Checked on Day 153 (V22):** at market weights
+  (₹1,054.00 × 49,168,433 shares = ₹5,182 cr of equity against ₹329.3 cr of debt)
+  the debt weight is 5.97% instead of 14.29%, the relevered beta 0.749, and WACC
+  11.97% instead of 11.76%. Both undated ceilings fall, to ₹889.87 (10-year) and
+  ₹698.29 (perpetual), so the conclusion does not change.
+  `python -m reverse_dcf.wacc --price 1054` prints both blocks and
+  `python -m reverse_dcf.grill` check 5 reruns the solves. The base case stays
+  at book weights.
 - **The relevered beta is a Hamada-formula estimate, not a directly measured
   company beta.** It unlevers Damodaran's `Chemical (Basic)` India industry
   average and relevers it to Gulf Oil's own FY2023-24 debt and tax rate. Hamada

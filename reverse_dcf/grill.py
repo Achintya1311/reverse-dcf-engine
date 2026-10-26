@@ -51,7 +51,9 @@ from dataclasses import dataclass
 
 from reverse_dcf.compare import historical_revenue_cagr
 from reverse_dcf.forward import DEFAULT_FINANCIALS
-from reverse_dcf.solve import PriceUnreachableError, implied_growth, load_market_price, solve
+from reverse_dcf.financials import load_financials, to_numeric
+from reverse_dcf.solve import PriceUnreachableError, implied_growth, load_market_price, perpetual_breakeven_growth, solve
+from reverse_dcf.wacc import compute_wacc
 
 
 def base_year_robustness_check(financials_path=DEFAULT_FINANCIALS) -> dict:
@@ -191,6 +193,55 @@ def roic_anchor_robustness_check(
     }
 
 
+@dataclass(frozen=True)
+class CapitalStructureResult:
+    """V22: one WACC basis and what the 10-year and perpetual solves give at it."""
+
+    wacc: float
+    weight_debt: float
+    reachable_10y: bool
+    ceiling_10y: float | None
+    reachable_perpetual: bool
+    ceiling_perpetual: float | None
+
+
+def _at_wacc(target_price: float, financials_path, wacc_result) -> CapitalStructureResult:
+    try:
+        implied_growth(target_price, financials_path, wacc=wacc_result.wacc)
+        reachable_10y, ceiling_10y = True, None
+    except PriceUnreachableError as exc:
+        reachable_10y, ceiling_10y = False, target_price + exc.best_price_gap
+    try:
+        perpetual_breakeven_growth(target_price, financials_path, wacc=wacc_result.wacc)
+        reachable_perpetual, ceiling_perpetual = True, None
+    except PriceUnreachableError as exc:
+        reachable_perpetual, ceiling_perpetual = False, target_price + exc.best_price_gap
+    return CapitalStructureResult(
+        wacc=wacc_result.wacc,
+        weight_debt=wacc_result.weight_debt,
+        reachable_10y=reachable_10y,
+        ceiling_10y=ceiling_10y,
+        reachable_perpetual=reachable_perpetual,
+        ceiling_perpetual=ceiling_perpetual,
+    )
+
+
+def market_weights_check(target_price: float, financials_path=DEFAULT_FINANCIALS) -> dict:
+    """V22 (CRITIQUES.md): rerun the undated solves with WACC at market rather than book weights.
+
+    The README's Limitations name book weights as a known bias (equity
+    proxied by total assets less debt). Market capitalisation is
+    ``target_price`` times the latest fiscal year's share count, in the
+    financials' lakh units. The base case stays at book weights.
+    """
+    shares = to_numeric(load_financials(financials_path))["shares_outstanding"].iloc[-1]
+    market_cap = target_price * shares / 100_000
+    return {
+        "book": _at_wacc(target_price, financials_path, compute_wacc(financials_path)),
+        "market": _at_wacc(target_price, financials_path, compute_wacc(financials_path, market_cap=market_cap)),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ticker", default="GULFOILLUB")
@@ -244,8 +295,33 @@ def main() -> None:
     print("\n4. Valuation-date check (V18: the base-year value carried to the price date):")
     if market is None:
         print("   skipped: --price has no date to carry the value to")
-        return
-    dated = solve(price, args.financials, ticker=args.ticker, price_date=market.date)
+    else:
+        _print_dated_check(price, args.financials, args.ticker, market.date)
+
+    print("\n5. Capital-structure check (V22: WACC at market rather than book weights, undated solves):")
+    weights = market_weights_check(price, args.financials)
+
+    def _ceiling(reachable: bool, ceiling: float | None) -> str:
+        return "reachable" if reachable else f"unreachable, ceiling Rs{ceiling:,.2f}"
+
+    for basis in ("book", "market"):
+        r = weights[basis]
+        marker = " <- base case" if basis == "book" else ""
+        print(
+            f"   {basis + ' weights:':<15} WACC {r.wacc:.2%} (debt {r.weight_debt:.2%}); "
+            f"10y {_ceiling(r.reachable_10y, r.ceiling_10y)}; "
+            f"perpetual {_ceiling(r.reachable_perpetual, r.ceiling_perpetual)}{marker}"
+        )
+    changes = (weights["book"].reachable_10y, weights["book"].reachable_perpetual) != (
+        weights["market"].reachable_10y,
+        weights["market"].reachable_perpetual,
+    )
+    verdict = "CHANGES the reachability conclusion" if changes else "does not change the reachability conclusion"
+    print(f"   -> using market weights {verdict}")
+
+
+def _print_dated_check(price, financials, ticker, price_date) -> None:
+    dated = solve(price, financials, ticker=ticker, price_date=price_date)
     undated = "reachable" if dated.price_reachable else f"unreachable (ceiling Rs{dated.max_achievable_price_10y:,.2f})"
     print(f"   as of {dated.base_fiscal_year} year end:  {undated} <- base case")
     if dated.price_reachable_dated:

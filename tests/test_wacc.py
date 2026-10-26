@@ -199,3 +199,35 @@ def test_compute_wacc_raises_clearly_for_a_negative_book_equity_ticker(tmp_path)
     path.write_text(_NEGATIVE_BOOK_EQUITY_FINANCIALS)
     with pytest.raises(ValueError, match="DISTRESSEDCO"):
         compute_wacc(path, ticker="DISTRESSEDCO")
+
+
+# -- Day 153 (V22): the market-weights WACC the README's Limitations ask for --
+
+
+def test_market_weights_use_market_cap_for_equity():
+    from reverse_dcf.wacc import compute_wacc
+
+    market_cap_lakh = 1054.0 * 49168433 / 100_000
+    result = compute_wacc(market_cap=market_cap_lakh)
+    assert result.weights_basis == "market"
+    assert result.weight_debt == pytest.approx(32931.01 / (32931.01 + market_cap_lakh))
+    assert result.weight_debt == pytest.approx(0.0597, abs=1e-4)
+    assert result.relevered_beta == pytest.approx(0.749, abs=1e-3)
+    assert result.wacc == pytest.approx(0.1197, abs=1e-4)
+    assert "(market)" in result.assumptions_block()
+
+
+def test_book_weights_stay_the_default():
+    from reverse_dcf.wacc import compute_wacc
+
+    result = compute_wacc()
+    assert result.weights_basis == "book"
+    assert result.weight_debt == pytest.approx(0.1429, abs=1e-4)
+    assert "(book)" in result.assumptions_block()
+
+
+def test_market_cap_must_be_positive():
+    from reverse_dcf.wacc import compute_wacc
+
+    with pytest.raises(ValueError, match="market cap"):
+        compute_wacc(market_cap=0.0)

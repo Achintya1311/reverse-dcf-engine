@@ -304,6 +304,7 @@ def perpetual_breakeven_growth(
     reinvestment_rate: float | None = None,
     roic_spread: float = TERMINAL_ROIC_SPREAD_DEFAULT,
     ticker: str | None = None,
+    wacc: float | None = None,
 ) -> float:
     """The single constant growth rate, held forever, that reproduces ``target_price``.
 
@@ -339,6 +340,7 @@ def perpetual_breakeven_growth(
         revenue_growth=0.0,
         forecast_years=1,
         terminal_growth=0.0,
+        wacc=wacc,
         roic_spread=roic_spread,
         ticker=ticker,
     )

@@ -201,3 +201,26 @@ def test_cli_skips_the_valuation_date_check_for_an_undated_price(monkeypatch, ca
     monkeypatch.setattr(sys, "argv", ["grill.py", "--price", "1000"])
     main()
     assert "skipped: --price has no date" in capsys.readouterr().out
+
+
+def test_cli_prints_the_market_weights_check(monkeypatch, capsys):
+    import sys
+
+    from reverse_dcf.grill import main
+
+    monkeypatch.setattr(sys, "argv", ["grill.py"])
+    main()
+    out = capsys.readouterr().out.split("5. Capital-structure check", 1)[1]
+    assert "book weights:   WACC 11.76%" in out
+    assert "market weights: WACC 11.97%" in out
+    assert "does not change the reachability conclusion" in out
+
+
+def test_market_weights_check_lowers_both_ceilings():
+    from reverse_dcf.grill import market_weights_check
+
+    r = market_weights_check(1054.0)
+    assert r["market"].wacc > r["book"].wacc
+    assert r["market"].ceiling_10y < r["book"].ceiling_10y
+    assert r["market"].ceiling_perpetual < r["book"].ceiling_perpetual
+    assert r["book"].ceiling_10y == pytest.approx(904.98, abs=0.01)

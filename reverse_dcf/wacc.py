@@ -177,6 +177,9 @@ class WaccResult:
     weight_debt: float
     weight_equity: float
     wacc: float
+    weights_basis: str = "book"
+    """V22: ``"book"`` (the default, :func:`capital_structure`) or
+    ``"market"`` (equity at market capitalisation, ``compute_wacc(market_cap=...)``)."""
 
     def assumptions_block(self) -> str:
         lines = [
@@ -189,7 +192,7 @@ class WaccResult:
             f"  Effective tax rate ({self.fiscal_year}):              {self.effective_tax_rate:.2%}",
             f"  Cost of debt, pre-tax:                               {self.cost_of_debt_pretax:.2%}",
             f"  Cost of debt, after-tax:                             {self.cost_of_debt_after_tax:.2%}",
-            f"  Weight of debt / equity (book):                     {self.weight_debt:.2%} / {self.weight_equity:.2%}",
+            f"  Weight of debt / equity ({self.weights_basis}):{' ' * (25 - len(self.weights_basis))}{self.weight_debt:.2%} / {self.weight_equity:.2%}",
             f"  WACC:                                                {self.wacc:.2%}",
         ]
         return "\n".join(lines) + "\n"
@@ -200,8 +203,14 @@ def compute_wacc(
     fiscal_year: str | None = None,
     *,
     ticker: str | None = None,
+    market_cap: float | None = None,
 ) -> WaccResult:
     """Compute Gulf Oil Lubricants India's WACC for one fiscal year.
+
+    V22 (CRITIQUES.md): ``market_cap`` (in the financials' lakh units) swaps
+    the book-equity proxy for market capitalisation, in both the weights
+    and the D/E the industry beta is relevered to. ``None`` keeps the book
+    weights every caller before Day 153 used.
 
     Defaults to the most recent fiscal year in ``financials_path`` - current
     capital structure and cost of debt are the standard WACC inputs, not a
@@ -238,8 +247,15 @@ def compute_wacc(
     )
 
     industry = load_industry_beta()
-    weight_debt, weight_equity = capital_structure(current["total_debt"], current["total_assets"], ticker=ticker)
-    de_ratio = current["total_debt"] / (current["total_assets"] - current["total_debt"])
+    if market_cap is None:
+        weight_debt, weight_equity = capital_structure(current["total_debt"], current["total_assets"], ticker=ticker)
+        de_ratio = current["total_debt"] / (current["total_assets"] - current["total_debt"])
+    else:
+        if market_cap <= 0:
+            raise ValueError(f"market cap must be positive, got {market_cap:,.2f}")
+        weight_debt = current["total_debt"] / (current["total_debt"] + market_cap)
+        weight_equity = 1 - weight_debt
+        de_ratio = current["total_debt"] / market_cap
     beta_l = relever_beta(industry["unlevered_beta"], tax_rate, de_ratio)
 
     rf = load_risk_free_rate()
@@ -261,6 +277,7 @@ def compute_wacc(
         weight_debt=weight_debt,
         weight_equity=weight_equity,
         wacc=wacc,
+        weights_basis="book" if market_cap is None else "market",
     )
 
 
@@ -268,9 +285,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--financials", default=str(DEFAULT_FINANCIALS))
     parser.add_argument("--fiscal-year", default=None, help="defaults to the most recent year in the CSV")
+    parser.add_argument(
+        "--price",
+        type=float,
+        default=None,
+        help="V22: also print the WACC at market weights, equity = this price x the fiscal year's share count",
+    )
     args = parser.parse_args()
     result = compute_wacc(args.financials, args.fiscal_year)
     print(result.assumptions_block())
+    if args.price is not None:
+        df = to_numeric(load_financials(args.financials)).set_index("fiscal_year")
+        shares = df.loc[result.fiscal_year, "shares_outstanding"]
+        market = compute_wacc(args.financials, args.fiscal_year, market_cap=args.price * shares / 100_000)
+        print(f"At market weights (Rs{args.price:,.2f}/share x {shares:,.0f} shares):")
+        print(market.assumptions_block())
 
 
 if __name__ == "__main__":
