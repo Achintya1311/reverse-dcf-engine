@@ -432,5 +432,53 @@ def test_cli_contract_flag_writes_the_v0_7_json_block(monkeypatch, capsys, tmp_p
     assert written["valuation"]["price_reachable"] is False
 
     market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
-    result = solve(market.price, DEFAULT_FINANCIALS, ticker="GULFOILLUB")
+    result = solve(market.price, DEFAULT_FINANCIALS, ticker="GULFOILLUB", price_date=market.date)
     assert written == result.to_contract()
+
+
+def test_contract_names_the_price_date_and_base_year_it_was_solved_against():
+    """V17: price_reachable and the ceilings mean nothing without their basis."""
+    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
+    result = solve(market.price, DEFAULT_FINANCIALS, ticker="GULFOILLUB", price_date=market.date)
+    valuation = result.to_contract()["valuation"]
+    assert valuation["price"] == pytest.approx(market.price)
+    assert valuation["price_date"] == market.date
+    assert valuation["base_fiscal_year"] == "FY2023-24"
+
+
+def test_contract_price_date_is_none_for_a_bare_price():
+    result = solve(1000.0, DEFAULT_FINANCIALS, ticker="GULFOILLUB")
+    valuation = result.to_contract()["valuation"]
+    assert valuation["price"] == pytest.approx(1000.0)
+    assert valuation["price_date"] is None
+
+
+def test_cli_contract_carries_the_fixture_price_date(monkeypatch, tmp_path):
+    import json
+    import sys
+
+    from reverse_dcf.solve import main
+
+    out = tmp_path / "valuation.json"
+    monkeypatch.setattr(sys, "argv", ["solve.py", "--contract", str(out)])
+    main()
+    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
+    valuation = json.loads(out.read_text())["valuation"]
+    assert valuation["price_date"] == market.date
+    assert valuation["price"] == pytest.approx(market.price)
+
+
+def test_cli_contract_takes_the_date_of_a_prices_csv_last_close(monkeypatch, tmp_path):
+    import json
+    import sys
+
+    from reverse_dcf.solve import main
+
+    prices = tmp_path / "prices.csv"
+    prices.write_text("date,open,high,low,close,volume\n2026-10-08,1,1,1,1000,1\n2026-10-09,1,1,1,1077.3,1\n")
+    out = tmp_path / "valuation.json"
+    monkeypatch.setattr(sys, "argv", ["solve.py", "--prices-csv", str(prices), "--contract", str(out)])
+    main()
+    valuation = json.loads(out.read_text())["valuation"]
+    assert valuation["price_date"] == "2026-10-09"
+    assert valuation["price"] == pytest.approx(1077.3)

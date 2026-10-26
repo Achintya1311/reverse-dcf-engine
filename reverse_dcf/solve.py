@@ -461,6 +461,11 @@ class ReverseDcfResult:
     yfinance adapter). Carried through :meth:`to_contract` as an additive
     key so nothing downstream mistakes a "lite" live result for the
     hand-verified GULFOILLUB one."""
+    price_date: str | None = None
+    """V17: the date of ``target_price`` (the market fixture's or a prices
+    CSV's last close), ``None`` for a bare ``--price``."""
+    base_fiscal_year: str | None = None
+    """V17: the last fiscal year in the financials the solve was run on."""
 
     def summary(self) -> str:
         lines = [
@@ -528,6 +533,10 @@ class ReverseDcfResult:
                 "max_achievable_price_perpetual": self.max_achievable_price_perpetual,
                 "growth_at_max_achievable_price_perpetual": self.growth_at_max_achievable_price_perpetual,
                 "financials_source": self.financials_source,
+                # V17: the basis every other key is relative to (additive).
+                "price": self.target_price,
+                "price_date": self.price_date,
+                "base_fiscal_year": self.base_fiscal_year,
             }
         }
 
@@ -541,6 +550,7 @@ def solve(
     terminal_growth: float | None = None,
     roic_spread: float = TERMINAL_ROIC_SPREAD_DEFAULT,
     financials_source: str = FINANCIALS_SOURCE_HAND,
+    price_date: str | None = None,
 ) -> ReverseDcfResult:
     """Run the full Day 5 reverse solve: implied growth plus the perpetual breakeven, at the base-case margin and V2's growth/ROIC-derived reinvestment schedule.
 
@@ -620,6 +630,8 @@ def solve(
         max_achievable_price_perpetual=max_price_perpetual,
         growth_at_max_achievable_price_perpetual=growth_at_max_perpetual,
         financials_source=financials_source,
+        price_date=price_date,
+        base_fiscal_year=str(load_financials(financials_path)["fiscal_year"].iloc[-1]),
     )
 
 
@@ -681,14 +693,17 @@ def main() -> None:
         financials_source = FINANCIALS_SOURCE_LIVE
 
     market = None
+    price_date = None
     if args.prices_csv:
         prices_df = pd.read_csv(args.prices_csv)
         last_row = prices_df.iloc[-1]
         price = float(last_row["close"])
+        price_date = str(last_row["date"])
         price_source = f"{args.prices_csv} (last close, {last_row['date']})"
     elif args.price is None:
         market = load_market_price(args.ticker)
         price = market.price
+        price_date = market.date
         price_source = None
     else:
         price = args.price
@@ -701,6 +716,7 @@ def main() -> None:
         forecast_years=args.years,
         terminal_growth=args.terminal_growth,
         financials_source=financials_source,
+        price_date=price_date,
     )
     print(result.summary())
     if market is not None:

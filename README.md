@@ -577,7 +577,7 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
 
 ## Where this sits
 
-Part of an eight-repo research pipeline. Stock Stalker screens the NSE universe; this repo publishes a versioned artifact it reads back. This is the real shape as of Day 31 (P27) -- regenerated from `python -m reverse_dcf.solve --contract <path>` against the committed GULFOILLUB fixture, not a hand-written illustration (the pre-V2 example this replaced hadn't matched `to_contract()`'s actual output since v0.7, and its three populated keys are in fact `null` for today's real ticker and price):
+Part of an eight-repo research pipeline. Stock Stalker screens the NSE universe; this repo publishes a versioned artifact it reads back. This is the real shape, last regenerated 26 Oct 2026 (Day 147, V17; first written Day 31, P27) -- regenerated from `python -m reverse_dcf.solve --contract <path>` against the committed GULFOILLUB fixture, not a hand-written illustration (the pre-V2 example this replaced hadn't matched `to_contract()`'s actual output since v0.7, and its three populated keys are in fact `null` for today's real ticker and price):
 
 ```json
 {
@@ -588,17 +588,22 @@ Part of an eight-repo research pipeline. Stock Stalker screens the NSE universe;
     "breakeven_growth": null,
     "implied_reinvestment_terminal": null,
     "median_roic": 0.25887134520602134,
-    "terminal_roic": 0.11610477172909299,
+    "terminal_roic": 0.11756184381039692,
     "price_reachable": false,
-    "max_achievable_price_10y": 914.5482826509398,
-    "growth_at_max_achievable_price_10y": 0.11609717839827303,
+    "max_achievable_price_10y": 904.9835316241711,
+    "growth_at_max_achievable_price_10y": 0.11755424179417283,
     "breakeven_reachable": false,
-    "max_achievable_price_perpetual": 715.5156570453562,
-    "growth_at_max_achievable_price_perpetual": 0.11609717839827302,
-    "financials_source": "hand-entered, 10-year (GULFOILLUB base case)"
+    "max_achievable_price_perpetual": 708.4122816087266,
+    "growth_at_max_achievable_price_perpetual": 0.11755424179417283,
+    "financials_source": "hand-entered, 10-year (GULFOILLUB base case)",
+    "price": 1054.0,
+    "price_date": "2026-10-26",
+    "base_fiscal_year": "FY2023-24"
   }
 }
 ```
+
+`price`, `price_date` and `base_fiscal_year` (V17) are the basis every other key is relative to: the price and date the solve was run against and the last fiscal year of the financials. `implied_ebit_margin` is that base year's EBIT margin held fixed, an input, not a solved value; the key keeps its v0.7 name because STOCKSTALKER's gate requires it (V16).
 
 The `null`s are V2/V3's honest answer for GULFOILLUB at its committed price (no constant growth rate reaches it -- see the v1/v2/v3 table above); `implied_ebit_margin`, `median_roic`, `terminal_roic` and the two `max_achievable_price*`/`growth_at_max_achievable_price*` ceiling pairs are always populated. Communication is by file contract, not imports, so either side can be refactored without breaking the other.
 
