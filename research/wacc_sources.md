@@ -21,7 +21,7 @@ business description:
   "Gulf Oil Lubricants India Limited (NSEI:GULFOILLUB)" - `Industry Group` =
   `Chemical (Basic)`, `Primary Sector` = `Materials`, `SIC Code` = `2990`,
   `Broad Group` = `Emerging Markets`, `Sub Group` = `India`.
-- Fetched 2026-09-11.
+- Fetched 2026-09-11; refreshed 2026-10-25 by `.github/workflows/fetch-wacc-inputs.yml` (commit `427c9e4`).
 - `scripts/fetch_wacc_inputs.py` re-checks this classification every time the
   fixtures are refreshed and refuses to proceed silently if Damodaran has
   reclassified the company.
@@ -42,7 +42,7 @@ business description:
 - The "Equity Risk Premium" column is already the *total* India ERP (mature-market
   ERP plus country risk premium), per the page's own methodology section - used
   directly in `cost_of_equity()`, not added to a separate mature-market figure.
-- Fetched 2026-09-11.
+- Fetched 2026-09-11; refreshed 2026-10-25 by `.github/workflows/fetch-wacc-inputs.yml` (commit `427c9e4`).
 
 ## Fixture 2 — India industry beta (Chemical (Basic))
 
@@ -72,7 +72,7 @@ business description:
   beta with a debt-only relevering step would double-count part of the
   adjustment. Using the plain unlevered beta and relevering only for debt (not
   cash) keeps the two adjustments from overlapping.
-- Fetched 2026-09-11.
+- Fetched 2026-09-11; refreshed 2026-10-25 by `.github/workflows/fetch-wacc-inputs.yml` (commit `427c9e4`).
 
 ## Fixture 3 — India risk-free rate
 
@@ -82,8 +82,8 @@ business description:
   Bond Yields: 10-Year: Main (Including Benchmark) for India"
   (<https://fred.stlouisfed.org/graph/fredgraph.csv?id=INDIRLTLT01STM>).
 - `load_risk_free_rate()` uses the most recent observation in the fixture:
-  **6.89%** (2026-06-01). FRED/OECD data for this series lags roughly two to
-  three months behind the fetch date (2026-09-11), which is normal for this
+  **7.06%** (2026-09-01; it was 6.89%, 2026-06-01, at the first fetch). FRED/OECD data for this
+  series lags roughly one to three months behind the fetch date (2026-10-25), which is normal for this
   series, not a data-quality issue - the trailing 12 months are kept in the
   fixture (rather than only the latest point) precisely so a reader can see
   that lag and the recent trend for themselves.
@@ -91,7 +91,7 @@ business description:
   rate: Gulf Oil's financials and this DCF are denominated in INR throughout: a
   USD risk-free rate paired with an INR-denominated cash flow forecast would be
   a currency mismatch inside the discount rate itself.
-- Fetched 2026-09-11.
+- Fetched 2026-09-11; refreshed 2026-10-25 by `.github/workflows/fetch-wacc-inputs.yml` (commit `427c9e4`).
 
 ## Company-specific inputs (not fetched - derived from `data/GULFOILLUB/financials.csv`)
 
@@ -115,20 +115,23 @@ is only the *formula*, not a new source.
   docstring and the README limitations section for exactly what this proxy
   assumes away.
 
-## Result (FY2023-24, `python -m reverse_dcf.wacc`)
+## Result (FY2023-24, `python -m reverse_dcf.wacc`, fixtures of 2026-10-25)
+
+On the first fetch (2026-09-11) the same command printed a 6.89% risk-free rate, 12.58% cost of
+equity and 11.61% WACC; of the three inputs, the 2026-10-25 refresh changed only the risk-free rate.
 
 ```
 WACC assumptions -- FY2023-24 (Gulf Oil Lubricants India)
-  Risk-free rate (India 10Y G-Sec, latest FRED obs.): 6.89%
+  Risk-free rate (India 10Y G-Sec, latest FRED obs.): 7.06%
   India equity risk premium (Damodaran):              7.08%
   Industry unlevered beta (Chemical (Basic), India): 0.7153
   Relevered to Gulf Oil's own D/E and tax rate:       0.8041
-  Cost of equity (CAPM):                              12.58%
+  Cost of equity (CAPM):                              12.75%
   Effective tax rate (FY2023-24):              25.48%
   Cost of debt, pre-tax:                               7.75%
   Cost of debt, after-tax:                             5.78%
   Weight of debt / equity (book):                     14.29% / 85.71%
-  WACC:                                                11.61%
+  WACC:                                                11.76%
 ```
 
 Not a precision claim - see the README limitations section for the book-vs-market
