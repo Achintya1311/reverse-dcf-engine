@@ -4,7 +4,7 @@ Educational research on historical data. Not investment advice. Not a SEBI-regis
 
 **Question:** at a given share price, what growth, margin and reinvestment does a textbook-consistent reverse DCF say must be assumed — and is that combination even reachable under the model?
 **Method:** derive reinvestment from growth via ROIC (`growth = reinvestment × ROIC`, ROIC fading from the 10-year median realized value to WACC) instead of holding one historical fiscal year's reinvestment rate fixed, then solve for the constant growth rate that reproduces the price. The terminal year now satisfies the same identity at its own (slower) terminal growth, not the explicit period's.
-**Finding (v3):** no constant growth rate reproduces the committed price at all — the model's own ceiling is ₹904.98/share (10-year framing) or ₹708.41/share (perpetual framing), both below the ₹1,039.00 price of 2026-10-25, at an 11.76% WACC from the 2026-10-25 WACC fixtures. Both ceilings sit on the model's growth bound (11.76%, where final-year reinvestment reaches 100% of NOPAT), not at an interior peak; see "The headline v2 finding". v3's terminal-value fix *lowered* the 10-year ceiling from v2's own (overstated) ₹962.08 to ₹914.55 at the WACC of the time (11.61%). See "The headline v3 finding" below.
+**Finding (v3, FY2023-24 base year):** no constant growth rate reproduces the committed price at all — the model's own ceiling is ₹904.98/share (10-year framing) or ₹708.41/share (perpetual framing), both below the ₹1,039.00 price of 2026-10-25, at an 11.76% WACC from the 2026-10-25 WACC fixtures. Both ceilings sit on the model's growth bound (11.76%, where final-year reinvestment reaches 100% of NOPAT), not at an interior peak; see "The headline v2 finding". v3's terminal-value fix *lowered* the 10-year ceiling from v2's own (overstated) ₹962.08 to ₹914.55 at the WACC of the time (11.61%). See "The headline v3 finding" below.
 **Chart:** `outputs/tornado.png` — the five-assumption sensitivity tornado (WACC, terminal growth, EBIT margin, reinvestment rate, terminal ROIC spread).
 **Reproduce:** `python -m reverse_dcf.solve`
 
@@ -334,6 +334,7 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
 ## Limitations and what would make me wrong
 
 - Ten years of hand-entered financials is a small sample and a transcription risk. Every figure is cited so it can be checked.
+- The financials stop at FY2023-24 (year ended March 2024), but the model is solved against the 25 Oct 2026 price. FY2024-25 and FY2025-26 are not entered yet: the annual-report archive these figures are transcribed from can't be reached from the build sandbox (hub CRITIQUES.md S25). So the base-year EBIT margin (13.37%), the reinvestment history and the ROIC median are about two and a half years older than the price they are set against (D35).
 - Implied assumptions are only as good as the WACC. The cost of equity uses a published India ERP rather than a bottom-up estimate.
 - The solver assumes a single-stage-plus-terminal structure. A business mid-transition may not be well described by it.
 - **Fixed in v3 (17 Oct 2026, CRITIQUES.md V6): the terminal value no longer extrapolates the
