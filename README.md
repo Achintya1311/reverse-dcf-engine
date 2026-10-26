@@ -4,7 +4,7 @@ Educational research on historical data. Not investment advice. Not a SEBI-regis
 
 **Question:** at a given share price, what growth, margin and reinvestment does a textbook-consistent reverse DCF say must be assumed — and is that combination even reachable under the model?
 **Method:** derive reinvestment from growth via ROIC (`growth = reinvestment × ROIC`, ROIC fading from the 10-year median realized value to WACC) instead of holding one historical fiscal year's reinvestment rate fixed, then solve for the constant growth rate that reproduces the price. The terminal year now satisfies the same identity at its own (slower) terminal growth, not the explicit period's.
-**Finding (v3):** no constant growth rate reproduces the committed price at all — the model's own ceiling is ₹904.98/share (10-year framing) or ₹708.41/share (perpetual framing), both below the ₹1,039.00 price of 2026-10-25, at an 11.76% WACC from the 2026-10-25 WACC fixtures. v3's terminal-value fix *lowered* the 10-year ceiling from v2's own (overstated) ₹962.08 to ₹914.55 at the WACC of the time (11.61%). See "The headline v3 finding" below.
+**Finding (v3):** no constant growth rate reproduces the committed price at all — the model's own ceiling is ₹904.98/share (10-year framing) or ₹708.41/share (perpetual framing), both below the ₹1,039.00 price of 2026-10-25, at an 11.76% WACC from the 2026-10-25 WACC fixtures. Both ceilings sit on the model's growth bound (11.76%, where final-year reinvestment reaches 100% of NOPAT), not at an interior peak; see "The headline v2 finding". v3's terminal-value fix *lowered* the 10-year ceiling from v2's own (overstated) ₹962.08 to ₹914.55 at the WACC of the time (11.61%). See "The headline v3 finding" below.
 **Chart:** `outputs/tornado.png` — the five-assumption sensitivity tornado (WACC, terminal growth, EBIT margin, reinvestment rate, terminal ROIC spread).
 **Reproduce:** `python -m reverse_dcf.solve`
 
@@ -123,6 +123,16 @@ spread raises the ceiling (a sensitivity worth knowing, not a different base cas
 Limitations), and a bull case resting on margin expansion, a higher sustained ROIC, or a
 business mid-transition isn't something this single-stage-plus-terminal structure is built to
 capture either way (pre-existing limitation, sharper now that reinvestment responds to growth).
+
+**Where the ceiling comes from (V15).** Both ceilings are the price at the upper end of the growth range the
+solver allows, not a peak inside it. Reinvestment is growth ÷ ROIC, and ROIC fades to its lowest value in the
+final explicit year (terminal ROIC = WACC + spread = 11.76% at the default zero spread). Above that growth
+rate, the final year would reinvest more than 100% of its NOPAT, so `implied_growth` caps the search there
+(`solve.py`, the clamp to `min(roic_schedule)`), and `perpetual_breakeven_growth` caps growth below WACC.
+Price is still rising at the cap: on the 2026-10-25 fixtures it is about ₹862 at 10% growth, ₹886 at 11%,
+₹899 at 11.5% and ₹905 at 11.76%, where final-year reinvestment is 85%, 94%, 98% and 100% of NOPAT. So
+"unreachable" means unreachable for any growth rate the business can fund from its own returns. The
+terminal ROIC spread (V13, Limitations) raises that bound, which is why a 2% spread makes the price reachable.
 
 One more V1-era intuition v2 overturns, and v3 leaves overturned (with revised numbers): V1
 guaranteed perpetual breakeven growth was always *lower* than the 10-year implied growth (a
