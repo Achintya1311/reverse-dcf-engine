@@ -178,3 +178,26 @@ def test_cli_runs_end_to_end_against_the_committed_fixtures(monkeypatch, capsys)
     assert "Base-year robustness" in out
     assert "Forecast-horizon robustness" in out
     assert "ROIC-anchor" in out
+
+
+def test_cli_prints_the_valuation_date_check(monkeypatch, capsys):
+    import sys
+
+    from reverse_dcf.grill import main
+
+    monkeypatch.setattr(sys, "argv", ["grill.py"])
+    main()
+    out = capsys.readouterr().out
+    assert "4. Valuation-date check" in out
+    assert "dated to 2026-10-26" in out
+    assert "CHANGES the reachability conclusion" in out.split("4. Valuation-date check")[1]
+
+
+def test_cli_skips_the_valuation_date_check_for_an_undated_price(monkeypatch, capsys):
+    import sys
+
+    from reverse_dcf.grill import main
+
+    monkeypatch.setattr(sys, "argv", ["grill.py", "--price", "1000"])
+    main()
+    assert "skipped: --price has no date" in capsys.readouterr().out

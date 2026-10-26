@@ -467,3 +467,52 @@ def test_cli_requires_growth_argument():
             main()
     finally:
         sys.argv = argv_backup
+
+
+# -- Day 150 (V18): carry the base-year value to the price date --
+
+
+def test_fiscal_year_end_is_31_march_of_the_closing_year():
+    from datetime import date
+
+    from reverse_dcf.forward import fiscal_year_end
+
+    assert fiscal_year_end("FY2023-24") == date(2024, 3, 31)
+    assert fiscal_year_end("FY2019-20") == date(2020, 3, 31)
+    with pytest.raises(ValueError):
+        fiscal_year_end("2023")
+
+
+def test_roll_forward_compounds_at_wacc_and_removes_elapsed_cash_flows():
+    from reverse_dcf.forward import roll_forward_share_price
+
+    result = run_dcf(base_case_from_financials(revenue_growth=0.05))
+    a = result.assumptions
+    t = 2.5
+    expected = (
+        result.equity_value * (1 + a.wacc) ** t
+        - result.fcffs[0] * (1 + a.wacc) ** (t - 1)
+        - result.fcffs[1] * (1 + a.wacc) ** (t - 2)
+    ) / a.shares_outstanding
+    assert roll_forward_share_price(result, t) == pytest.approx(expected)
+    assert roll_forward_share_price(result, 0.0) == pytest.approx(result.implied_share_price)
+
+
+def test_roll_forward_under_a_year_removes_no_cash_flow():
+    from reverse_dcf.forward import roll_forward_share_price
+
+    result = run_dcf(base_case_from_financials(revenue_growth=0.05))
+    a = result.assumptions
+    assert roll_forward_share_price(result, 0.5) == pytest.approx(
+        result.equity_value * (1 + a.wacc) ** 0.5 / a.shares_outstanding
+    )
+
+
+def test_roll_forward_refuses_to_run_past_the_explicit_forecast():
+    from reverse_dcf.forward import roll_forward_share_price
+
+    result = run_dcf(base_case_from_financials(revenue_growth=0.05, forecast_years=2))
+    with pytest.raises(ValueError, match="explicit forecast"):
+        roll_forward_share_price(result, 3.0)
+    with pytest.raises(ValueError):
+        roll_forward_share_price(result, -1.0)

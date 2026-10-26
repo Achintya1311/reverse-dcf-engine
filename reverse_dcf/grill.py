@@ -51,7 +51,7 @@ from dataclasses import dataclass
 
 from reverse_dcf.compare import historical_revenue_cagr
 from reverse_dcf.forward import DEFAULT_FINANCIALS
-from reverse_dcf.solve import PriceUnreachableError, implied_growth, load_market_price
+from reverse_dcf.solve import PriceUnreachableError, implied_growth, load_market_price, solve
 
 
 def base_year_robustness_check(financials_path=DEFAULT_FINANCIALS) -> dict:
@@ -198,7 +198,8 @@ def main() -> None:
     parser.add_argument("--price", type=float, default=None, help="current market price; defaults to fixtures/market/<ticker>.csv")
     args = parser.parse_args()
 
-    price = args.price if args.price is not None else load_market_price(args.ticker).price
+    market = load_market_price(args.ticker) if args.price is None else None
+    price = args.price if args.price is not None else market.price
 
     print(f"Day 9 -- attacking the conclusion, {args.ticker} at Rs{price:,.2f}/share\n")
 
@@ -239,6 +240,28 @@ def main() -> None:
         "CHANGES the reachability conclusion" if roic_anchor["changes_reachability"] else "does not change the reachability conclusion"
     )
     print(f"   -> anchoring on a recent window {verdict}")
+
+    print("\n4. Valuation-date check (V18: the base-year value carried to the price date):")
+    if market is None:
+        print("   skipped: --price has no date to carry the value to")
+        return
+    dated = solve(price, args.financials, ticker=args.ticker, price_date=market.date)
+    undated = "reachable" if dated.price_reachable else f"unreachable (ceiling Rs{dated.max_achievable_price_10y:,.2f})"
+    print(f"   as of {dated.base_fiscal_year} year end:  {undated} <- base case")
+    if dated.price_reachable_dated:
+        value = f"implied growth {dated.implied_growth_dated:+.2%}"
+    else:
+        value = "unreachable"
+    print(
+        f"   dated to {dated.price_date} ({dated.years_to_price_date:.2f} years later): {value} "
+        f"(ceiling Rs{dated.max_achievable_price_10y_dated:,.2f}/share)"
+    )
+    verdict = (
+        "CHANGES the reachability conclusion"
+        if dated.price_reachable_dated != dated.price_reachable
+        else "does not change the reachability conclusion"
+    )
+    print(f"   -> dating the value to the price {verdict} (elapsed years are modelled, not reported: S25)")
 
 
 if __name__ == "__main__":

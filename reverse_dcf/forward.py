@@ -39,8 +39,11 @@ Method, one line each:
 from __future__ import annotations
 
 import argparse
+import math
+import re
 import statistics
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from reverse_dcf.financials import load_financials, to_numeric
@@ -513,6 +516,40 @@ def run_dcf(assumptions: DcfAssumptions) -> DcfResult:
         equity_value=equity_value,
         implied_share_price=implied_share_price,
     )
+
+
+def fiscal_year_end(fiscal_year: str) -> date:
+    """V18: the balance-sheet date of an Indian fiscal year label, e.g. ``"FY2023-24"`` -> 31 Mar 2024."""
+    match = re.fullmatch(r"FY(\d{4})-(\d{2})", fiscal_year)
+    if match is None:
+        raise ValueError(f"fiscal year {fiscal_year!r} is not of the form FY2023-24")
+    return date(int(match.group(1)) + 1, 3, 31)
+
+
+def roll_forward_share_price(result: DcfResult, years_elapsed: float) -> float:
+    """V18 (CRITIQUES.md): carry :func:`run_dcf`'s per-share value from the base-year end to a later date.
+
+    :func:`present_value` discounts the first forecast year as t=1 from the
+    last fiscal year end, so ``implied_share_price`` is a value *as of that
+    year end*. A price ``years_elapsed`` later is compared with the equity
+    value compounded at WACC over that gap, less the forecast years that
+    have already elapsed (their FCFF, compounded to the same date, is no
+    longer in the claim the price buys). This is an approximation: those
+    elapsed years are the model's own forecast, not reported actuals (hub
+    CRITIQUES.md S25), and cash flows are taken at year ends.
+    """
+    if years_elapsed < 0:
+        raise ValueError(f"years_elapsed must be >= 0, got {years_elapsed}")
+    elapsed = math.floor(years_elapsed)
+    if elapsed >= result.assumptions.forecast_years:
+        raise ValueError(
+            f"{years_elapsed:.2f} years elapsed reaches past the {result.assumptions.forecast_years}-year "
+            "explicit forecast; roll-forward needs at least one forecast year still ahead"
+        )
+    wacc = result.assumptions.wacc
+    value = result.equity_value * (1 + wacc) ** years_elapsed
+    value -= sum(cf * (1 + wacc) ** (years_elapsed - t) for t, cf in enumerate(result.fcffs[:elapsed], start=1))
+    return value / result.assumptions.shares_outstanding
 
 
 def base_case_from_financials(

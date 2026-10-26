@@ -482,3 +482,60 @@ def test_cli_contract_takes_the_date_of_a_prices_csv_last_close(monkeypatch, tmp
     valuation = json.loads(out.read_text())["valuation"]
     assert valuation["price_date"] == "2026-10-09"
     assert valuation["price"] == pytest.approx(1077.3)
+
+
+# -- Day 150 (V18): the solve dated to the price date, beside the undated one --
+
+
+def test_years_between_base_year_end_and_price_date():
+    from reverse_dcf.solve import years_since_base_year
+
+    assert years_since_base_year("FY2023-24", "2026-10-26") == pytest.approx(939 / 365.25)
+    assert years_since_base_year("FY2023-24", None) is None
+
+
+def test_dated_solve_reports_the_rolled_ceiling_beside_the_undated_one():
+    from reverse_dcf.solve import solve
+
+    result = solve(1054.0, price_date="2026-10-26")
+    # the undated (31 Mar 2024) numbers are unchanged
+    assert result.price_reachable is False
+    assert result.max_achievable_price_10y == pytest.approx(904.98, abs=0.01)
+    # dated to 26 Oct 2026 the ceiling clears the price (critique 2026-10-27 point 1: ~Rs1,110)
+    assert result.years_to_price_date == pytest.approx(2.5708, abs=1e-4)
+    assert result.max_achievable_price_10y_dated == pytest.approx(1110.4, abs=0.5)
+    assert result.price_reachable_dated is True
+    assert result.implied_growth_dated is not None
+    assert 0 < result.implied_growth_dated < result.growth_at_max_achievable_price_10y
+
+
+def test_dated_implied_growth_round_trips_through_the_rolled_price():
+    from reverse_dcf.forward import roll_forward_share_price
+    from reverse_dcf.solve import implied_growth
+
+    t = 2.5708418891170433
+    g = implied_growth(1054.0, years_elapsed=t)
+    base = base_case_from_financials(revenue_growth=g)
+    assert roll_forward_share_price(run_dcf(base), t) == pytest.approx(1054.0, abs=0.01)
+
+
+def test_undated_solve_leaves_the_dated_fields_empty():
+    from reverse_dcf.solve import solve
+
+    result = solve(1054.0)
+    assert result.years_to_price_date is None
+    assert result.max_achievable_price_10y_dated is None
+    assert result.price_reachable_dated is None
+    assert result.implied_growth_dated is None
+
+
+def test_contract_carries_the_dated_keys_additively():
+    from reverse_dcf.solve import solve
+
+    block = solve(1054.0, price_date="2026-10-26").to_contract()["valuation"]
+    for key in ("implied_cagr", "implied_ebit_margin", "implied_reinvestment", "breakeven_growth"):
+        assert key in block
+    assert block["years_to_price_date"] == pytest.approx(2.5708, abs=1e-4)
+    assert block["price_reachable_dated"] is True
+    assert block["max_achievable_price_10y_dated"] == pytest.approx(1110.4, abs=0.5)
+    assert 0 < block["implied_cagr_dated"] < block["growth_at_max_achievable_price_10y"]

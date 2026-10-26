@@ -62,12 +62,14 @@ from reverse_dcf.forward import (
     DEFAULT_FINANCIALS,
     TERMINAL_ROIC_SPREAD_DEFAULT,
     base_case_from_financials,
+    fiscal_year_end,
     historical_median_roic,
     historical_reinvestment_rate,
     historical_roic_by_year,
     is_working_capital_release_year,
     reinvestment_schedule_from_growth,
     roic_fade_schedule,
+    roll_forward_share_price,
     run_dcf,
     terminal_roic,
 )
@@ -192,8 +194,15 @@ def implied_growth(
     bracket: tuple[float, float] = GROWTH_BRACKET,
     ticker: str | None = None,
     roic_anchor_years: int | None = None,
+    years_elapsed: float = 0.0,
 ) -> float:
     """Solve the explicit-period revenue growth that reproduces ``target_price``.
+
+    V18 (CRITIQUES.md): ``years_elapsed`` > 0 compares the target with the
+    model's value carried that many years past the base-year end
+    (:func:`reverse_dcf.forward.roll_forward_share_price`) instead of the
+    value as of the base-year end itself. 0 (the default) is the undated
+    solve every caller before Day 150 ran.
 
     Every other assumption comes from :func:`base_case_from_financials`
     (the latest fiscal year's actuals and Day 3's WACC) unless overridden -
@@ -242,7 +251,7 @@ def implied_growth(
         base = replace(base, reinvestment_rate=reinvestment_rate, terminal_reinvestment_rate=None)
 
         def price_gap(g: float) -> float:
-            return run_dcf(replace(base, revenue_growth=g)).implied_share_price - target_price
+            return _price(run_dcf(replace(base, revenue_growth=g)), years_elapsed) - target_price
     else:
         median_roic = historical_median_roic(
             financials_path, ticker=ticker, trailing_years=roic_anchor_years
@@ -266,9 +275,25 @@ def implied_growth(
 
         def price_gap(g: float) -> float:
             schedule = reinvestment_schedule_from_growth(g, roic_schedule)
-            return run_dcf(replace(base, revenue_growth=g, reinvestment_rate=schedule)).implied_share_price - target_price
+            result = run_dcf(replace(base, revenue_growth=g, reinvestment_rate=schedule))
+            return _price(result, years_elapsed) - target_price
 
     return _solve_growth(price_gap, bracket, "implied growth")
+
+
+def _price(result, years_elapsed: float) -> float:
+    """The per-share value as of the base-year end, or ``years_elapsed`` later (V18)."""
+    return roll_forward_share_price(result, years_elapsed) if years_elapsed else result.implied_share_price
+
+
+def years_since_base_year(base_fiscal_year: str, price_date: str | None) -> float | None:
+    """V18: years from the base fiscal year's 31 March to ``price_date`` (ISO), or None without a date."""
+    if price_date is None:
+        return None
+    from datetime import date
+
+    days = (date.fromisoformat(str(price_date)[:10]) - fiscal_year_end(base_fiscal_year)).days
+    return days / 365.25
 
 
 def perpetual_breakeven_growth(
@@ -466,6 +491,15 @@ class ReverseDcfResult:
     CSV's last close), ``None`` for a bare ``--price``."""
     base_fiscal_year: str | None = None
     """V17: the last fiscal year in the financials the solve was run on."""
+    years_to_price_date: float | None = None
+    """V18: years from ``base_fiscal_year``'s 31 March to ``price_date``. The
+    four ``*_dated`` fields re-solve the 10-year model with its value carried
+    over that gap (:func:`reverse_dcf.forward.roll_forward_share_price`);
+    all four are ``None`` without a ``price_date``."""
+    price_reachable_dated: bool | None = None
+    implied_growth_dated: float | None = None
+    max_achievable_price_10y_dated: float | None = None
+    growth_at_max_achievable_price_10y_dated: float | None = None
 
     def summary(self) -> str:
         lines = [
@@ -498,6 +532,19 @@ class ReverseDcfResult:
                 "  Perpetual breakeven growth:           none -- ceiling is "
                 f"Rs{self.max_achievable_price_perpetual:,.2f}/share at "
                 f"{self.growth_at_max_achievable_price_perpetual:+.2%} growth"
+            )
+        if self.years_to_price_date is not None:
+            lines.append(
+                f"  Dated to {self.price_date} (V18: {self.base_fiscal_year} year-end value carried "
+                f"{self.years_to_price_date:.2f} years at WACC, less the elapsed years' modelled FCFF):"
+            )
+            if self.price_reachable_dated:
+                lines.append(f"    Implied revenue growth (10y CAGR):  {self.implied_growth_dated:.2%}")
+            else:
+                lines.append("    Implied revenue growth (10y CAGR):  none -- no constant growth rate reproduces this price")
+            lines.append(
+                f"    10-year ceiling:                    Rs{self.max_achievable_price_10y_dated:,.2f}/share at "
+                f"{self.growth_at_max_achievable_price_10y_dated:+.2%} growth"
             )
         return "\n".join(lines) + "\n"
 
@@ -537,6 +584,12 @@ class ReverseDcfResult:
                 "price": self.target_price,
                 "price_date": self.price_date,
                 "base_fiscal_year": self.base_fiscal_year,
+                # V18: the 10-year solve dated to price_date (additive).
+                "years_to_price_date": self.years_to_price_date,
+                "price_reachable_dated": self.price_reachable_dated,
+                "implied_cagr_dated": self.implied_growth_dated,
+                "max_achievable_price_10y_dated": self.max_achievable_price_10y_dated,
+                "growth_at_max_achievable_price_10y_dated": self.growth_at_max_achievable_price_10y_dated,
             }
         }
 
@@ -610,6 +663,33 @@ def solve(
         max_price_perpetual = target_price + exc.best_price_gap
         growth_at_max_perpetual = exc.best_growth
 
+    base_fiscal_year = str(load_financials(financials_path)["fiscal_year"].iloc[-1])
+    years_to_price_date = years_since_base_year(base_fiscal_year, price_date)
+    price_reachable_dated = g_dated = max_price_dated = growth_at_max_dated = None
+    if years_to_price_date is not None:
+        growth_at_max_dated = min(roic_schedule) - 1e-6
+        bound = run_dcf(
+            replace(
+                base,
+                revenue_growth=growth_at_max_dated,
+                reinvestment_rate=reinvestment_schedule_from_growth(growth_at_max_dated, roic_schedule),
+            )
+        )
+        max_price_dated = roll_forward_share_price(bound, years_to_price_date)
+        try:
+            g_dated = implied_growth(
+                target_price,
+                financials_path,
+                forecast_years=forecast_years,
+                terminal_growth=base.terminal_growth,
+                roic_spread=roic_spread,
+                ticker=ticker,
+                years_elapsed=years_to_price_date,
+            )
+            price_reachable_dated = True
+        except PriceUnreachableError:
+            price_reachable_dated = False
+
     return ReverseDcfResult(
         ticker=ticker,
         target_price=target_price,
@@ -631,7 +711,12 @@ def solve(
         growth_at_max_achievable_price_perpetual=growth_at_max_perpetual,
         financials_source=financials_source,
         price_date=price_date,
-        base_fiscal_year=str(load_financials(financials_path)["fiscal_year"].iloc[-1]),
+        base_fiscal_year=base_fiscal_year,
+        years_to_price_date=years_to_price_date,
+        price_reachable_dated=price_reachable_dated,
+        implied_growth_dated=g_dated,
+        max_achievable_price_10y_dated=max_price_dated,
+        growth_at_max_achievable_price_10y_dated=growth_at_max_dated,
     )
 
 

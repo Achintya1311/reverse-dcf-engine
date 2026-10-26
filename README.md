@@ -4,7 +4,7 @@ Educational research on historical data. Not investment advice. Not a SEBI-regis
 
 **Question:** at a given share price, what growth, margin and reinvestment does a textbook-consistent reverse DCF say must be assumed — and is that combination even reachable under the model?
 **Method:** derive reinvestment from growth via ROIC (`growth = reinvestment × ROIC`, ROIC fading from the 10-year median realized value to WACC) instead of holding one historical fiscal year's reinvestment rate fixed, then solve for the constant growth rate that reproduces the price. The terminal year now satisfies the same identity at its own (slower) terminal growth, not the explicit period's.
-**Finding (v3, FY2023-24 base year):** no constant growth rate reproduces the committed price at all — the model's own ceiling is ₹904.98/share (10-year framing) or ₹708.41/share (perpetual framing), both below the ₹1,054.00 price of 2026-10-26, at an 11.76% WACC from the 2026-10-25 WACC fixtures. Both ceilings sit on the model's growth bound (11.76%, where final-year reinvestment reaches 100% of NOPAT), not at an interior peak; see "The headline v2 finding". v3's terminal-value fix *lowered* the 10-year ceiling from v2's own (overstated) ₹962.08 to ₹914.55 at the WACC of the time (11.61%). See "The headline v3 finding" below.
+**Finding (v3, FY2023-24 base year):** no constant growth rate reproduces the committed price at all — the model's own ceiling is ₹904.98/share (10-year framing) or ₹708.41/share (perpetual framing), both below the ₹1,054.00 price of 2026-10-26, at an 11.76% WACC from the 2026-10-25 WACC fixtures. Both ceilings sit on the model's growth bound (11.76%, where final-year reinvestment reaches 100% of NOPAT), not at an interior peak; see "The headline v2 finding". v3's terminal-value fix *lowered* the 10-year ceiling from v2's own (overstated) ₹962.08 to ₹914.55 at the WACC of the time (11.61%). See "The headline v3 finding" below. **Dated to the price (V18):** those ceilings are values as of the FY2023-24 year end (31 Mar 2024), 2.57 years before the price. Carried to 2026-10-26 at WACC, less the model's own FY2024-25 and FY2025-26 cash flows, the 10-year ceiling is ₹1,110.25/share and ₹1,054.00 is reachable at 10.28% implied growth. The elapsed years are modelled, not reported (S25), so this is an approximation; `python -m reverse_dcf.solve` prints both and `python -m reverse_dcf.grill` check 4 compares them.
 **Chart:** `outputs/tornado.png` — the five-assumption sensitivity tornado (WACC, terminal growth, EBIT margin, reinvestment rate, terminal ROIC spread).
 **Reproduce:** `python -m reverse_dcf.solve`
 
@@ -334,6 +334,7 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
 ## Limitations and what would make me wrong
 
 - Ten years of hand-entered financials is a small sample and a transcription risk. Every figure is cited so it can be checked.
+- **The undated solve values the company as of 31 Mar 2024 (V18).** `forward.present_value` discounts FY2024-25 as t=1 from the base-year end, so every undated price in this README is a value at that date, compared with a price 2.57 years later. `forward.roll_forward_share_price` carries it to the price date (compounded at WACC, minus the elapsed forecast years' FCFF); the dated solve is reported beside the undated one, not instead of it, because those elapsed years come from the model's own forecast, not reported actuals, and cash flows are taken at year ends.
 - The financials stop at FY2023-24 (year ended March 2024), but the model is solved against the 25 Oct 2026 price. FY2024-25 and FY2025-26 are not entered yet: the annual-report archive these figures are transcribed from can't be reached from the build sandbox (hub CRITIQUES.md S25). So the base-year EBIT margin (13.37%), the reinvestment history and the ROIC median are about two and a half years older than the price they are set against (D35).
 - Implied assumptions are only as good as the WACC. The cost of equity uses a published India ERP rather than a bottom-up estimate.
 - The solver assumes a single-stage-plus-terminal structure. A business mid-transition may not be well described by it.
@@ -577,7 +578,7 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
 
 ## Where this sits
 
-Part of an eight-repo research pipeline. Stock Stalker screens the NSE universe; this repo publishes a versioned artifact it reads back. This is the real shape, last regenerated 26 Oct 2026 (Day 147, V17; first written Day 31, P27) -- regenerated from `python -m reverse_dcf.solve --contract <path>` against the committed GULFOILLUB fixture, not a hand-written illustration (the pre-V2 example this replaced hadn't matched `to_contract()`'s actual output since v0.7, and its three populated keys are in fact `null` for today's real ticker and price):
+Part of an eight-repo research pipeline. Stock Stalker screens the NSE universe; this repo publishes a versioned artifact it reads back. This is the real shape, last regenerated 27 Oct 2026 (Day 150, V18; first written Day 31, P27) -- regenerated from `python -m reverse_dcf.solve --contract <path>` against the committed GULFOILLUB fixture, not a hand-written illustration (the pre-V2 example this replaced hadn't matched `to_contract()`'s actual output since v0.7, and its three populated keys are in fact `null` for today's real ticker and price):
 
 ```json
 {
@@ -598,12 +599,17 @@ Part of an eight-repo research pipeline. Stock Stalker screens the NSE universe;
     "financials_source": "hand-entered, 10-year (GULFOILLUB base case)",
     "price": 1054.0,
     "price_date": "2026-10-26",
-    "base_fiscal_year": "FY2023-24"
+    "base_fiscal_year": "FY2023-24",
+    "years_to_price_date": 2.5708418891170433,
+    "price_reachable_dated": true,
+    "implied_cagr_dated": 0.10278762114553543,
+    "max_achievable_price_10y_dated": 1110.2542542243593,
+    "growth_at_max_achievable_price_10y_dated": 0.11756084381039691
   }
 }
 ```
 
-`price`, `price_date` and `base_fiscal_year` (V17) are the basis every other key is relative to: the price and date the solve was run against and the last fiscal year of the financials. `implied_ebit_margin` is that base year's EBIT margin held fixed, an input, not a solved value; the key keeps its v0.7 name because STOCKSTALKER's gate requires it (V16).
+The `*_dated` keys and `years_to_price_date` (V18) are the same 10-year solve with the value carried from the base-year end to `price_date`; they are `null` when the price has no date. `price`, `price_date` and `base_fiscal_year` (V17) are the basis every other key is relative to: the price and date the solve was run against and the last fiscal year of the financials. `implied_ebit_margin` is that base year's EBIT margin held fixed, an input, not a solved value; the key keeps its v0.7 name because STOCKSTALKER's gate requires it (V16).
 
 The `null`s are V2/V3's honest answer for GULFOILLUB at its committed price (no constant growth rate reaches it -- see the v1/v2/v3 table above); `implied_ebit_margin`, `median_roic`, `terminal_roic` and the two `max_achievable_price*`/`growth_at_max_achievable_price*` ceiling pairs are always populated. Communication is by file contract, not imports, so either side can be refactored without breaking the other.
 
