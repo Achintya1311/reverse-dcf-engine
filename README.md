@@ -203,6 +203,8 @@ the tie-break is the right fallback if a non-monotonic case ever recurs.
 
 ## Findings
 
+**Current result (v3, 26 Oct 2026 fixtures).** At ₹1,054.00 and an 11.76% WACC, no constant growth rate reproduces the price when the value is dated at the FY2023-24 year end (ceilings ₹904.98/share 10-year, ₹708.41/share perpetual). Dated to the price date (V18) the 10-year ceiling is ₹1,110.25/share and the price is reachable at 10.28% implied growth. The Day 3-6 paragraphs further down are the v1 build log: their figures (−0.49% implied CAGR, 3.52% perpetual breakeven, ₹2,294/share at 10% growth, 11.61% WACC) are kept as history and are superseded (V21).
+
 Day 8 wrote [`REPORT.md`](REPORT.md), the two-page write-up this whole project exists to
 produce, rendered to `outputs/REPORT.pdf` by a new `scripts/render_report_pdf.py`
 (plain-text/table typesetting via matplotlib's `PdfPages` - no new dependency, since
@@ -242,7 +244,7 @@ window - whether that pace is what today's price already assumes going forward
 is exactly what the reverse solver (Day 5) exists to answer, not something to
 eyeball here.
 
-Day 6 set Day 5's implied figures against Gulf Oil's own ten-year realized
+*(v1 build log, superseded; current figures at the top of Findings.)* Day 6 set Day 5's implied figures against Gulf Oil's own ten-year realized
 history and three lubricant/oil peers (`reverse_dcf/compare.py`,
 `python -m reverse_dcf.compare`). The comparison table is the actual
 argument this project exists to make: solved against the ₹1,066.00/share
@@ -273,7 +275,7 @@ as "revenue" (see limitations), not a data error worth chasing further. 9
 new tests, 66/66 pass; the CLI run directly against the default fixture
 price and a `--price` override.
 
-Day 5 built the reverse solver (`reverse_dcf/solve.py`): `scipy.optimize.brentq`
+*(v1 build log, superseded; current figures at the top of Findings.)* Day 5 built the reverse solver (`reverse_dcf/solve.py`): `scipy.optimize.brentq`
 on Day 4's forward engine, searching for the constant explicit-period revenue
 growth rate that reproduces a given market price. Solving against **today's
 actual price (₹1,066/share, screener.in, 2026-10-19)** at the FY2023-24 base
@@ -305,7 +307,7 @@ comparison rather than reading this one number in isolation. 14 new tests
 `--price` override, and the unreachable-target error path all exercised by
 hand, not just under pytest.
 
-Day 4 built the forward FCFF DCF engine (`reverse_dcf/forward.py`) that Day 5's
+*(v1 build log, superseded; current figures at the top of Findings.)* Day 4 built the forward FCFF DCF engine (`reverse_dcf/forward.py`) that Day 5's
 reverse solver will call inside a root-finder. Revenue grows at a single constant
 rate for the explicit forecast, FCFF = EBIT x (1 - tax) x (1 - reinvestment rate),
 and a Gordon-growth terminal value picks up everything after. Every number is an
@@ -327,7 +329,7 @@ place real data enters the engine, and a regression test bounds the implied pric
 to a plausible order of magnitude so this can't silently reappear. 17 new tests,
 42/42 pass.
 
-Day 3 built the WACC module (`reverse_dcf/wacc.py`). Gulf Oil Lubricants India is
+*(v1 build log, superseded; current figures at the top of Findings.)* Day 3 built the WACC module (`reverse_dcf/wacc.py`). Gulf Oil Lubricants India is
 Damodaran's own `Chemical (Basic)` industry classification (`indname.xls`, not a
 guess from the lubricants business description); its India-industry unlevered beta
 (0.7153) relevers to 0.8041 against Gulf Oil's own FY2023-24 leverage and tax rate,
@@ -406,6 +408,9 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   was acquired mid-year, so a consolidated FY2023-24 would carry a partial-year
   acquisition discontinuity that standalone-across-all-ten-years avoids. See
   `research/sources.md`'s revised-decision entry for the full reasoning.
+  The price, though, is the listed share's, which capitalises the whole group:
+  `scripts/fetch_market_price.py` reads screener's consolidated page, and the
+  standalone equity value leaves out whatever the subsidiary is worth (V23).
 - **`ebit`, `ebitda` and `net_working_capital` are derived, not reported
   figures.** Ind AS statements after FY2016-17 don't report an EBITDA
   subtotal, so `ebit` = Profit before tax + Finance costs, and `ebitda` =
@@ -415,6 +420,11 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   Every derivation rule is documented once in `research/sources.md`'s
   methodology section and in the `reverse_dcf/financials.py` module docstring,
   rather than re-justified per cell in the citation ledger.
+- **The 14.54% realized-growth anchor is nominal revenue, partly price-led (V24).**
+  In `data/GULFOILLUB/financials.csv`, revenue rose 32.6% in FY2021-22 and 36.8% in
+  FY2022-23 while EBIT rose 3.7% and 19.2%, and the EBIT margin fell from 13.41% to
+  11.68%. The repo has no volume data, so it cannot split that history into price and
+  volume; set any implied growth rate against the anchor with that in mind.
 - **FY2014-15 isn't a normal first year.** Gulf Oil Lubricants India Limited
   was a shell company until mid-2014; the lubricants business was transferred
   in via a Scheme of Arrangement that fiscal year, so FY2014-15→FY2015-16

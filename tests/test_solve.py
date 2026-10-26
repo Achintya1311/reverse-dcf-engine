@@ -570,3 +570,18 @@ def test_readme_limitations_agree_with_the_perpetual_vs_ten_year_test():
     assert "so it is always the lower,\n  more conservative of the two" not in readme
     assert "test_perpetual_breakeven_growth_is_higher_than_the_ten_year_implied_growth" in readme
     assert "NOPAT × (1 + g) / WACC" in readme
+
+
+# -- Day 152 (V21): the Findings section leads with the live numbers --
+
+
+def test_readme_findings_open_with_the_live_ceiling_and_label_the_v1_log():
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    findings = readme.split("## Findings\n", 1)[1]
+    first_paragraph = findings.strip().split("\n\n", 1)[0]
+    result = solve(load_market_price().price, price_date=load_market_price().date)
+    assert f"₹{result.max_achievable_price_10y:,.2f}" in first_paragraph
+    assert f"₹{result.max_achievable_price_10y_dated:,.2f}" in first_paragraph
+    for day in ("Day 6 set", "Day 5 built", "Day 4 built", "Day 3 built"):
+        paragraph = findings.split(day, 1)[0].rsplit("\n\n", 1)[-1] + day
+        assert paragraph.startswith("*(v1 build log, superseded"), day
