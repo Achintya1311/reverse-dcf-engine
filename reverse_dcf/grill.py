@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from reverse_dcf.compare import historical_revenue_cagr
 from reverse_dcf.forward import DEFAULT_FINANCIALS
 from reverse_dcf.financials import load_financials, to_numeric
-from reverse_dcf.solve import PriceUnreachableError, implied_growth, load_market_price, perpetual_breakeven_growth, solve
+from reverse_dcf.solve import PriceUnreachableError, implied_growth, load_market_price, perpetual_breakeven_growth, solve, years_since_base_year
 from reverse_dcf.wacc import compute_wacc
 
 
@@ -242,6 +242,105 @@ def market_weights_check(target_price: float, financials_path=DEFAULT_FINANCIALS
     }
 
 
+@dataclass(frozen=True)
+class BreakevenWacc:
+    """V25: one framing's reachability boundary in WACC, with what it implies."""
+
+    wacc: float | None
+    cost_of_equity: float | None
+    beta: float | None
+    erp: float | None
+
+
+WACC_BRACKET = (0.071, 0.25)
+"""V25: searched WACC range. The low end sits just above the 7.06% terminal
+growth the 10-year solve needs WACC to exceed."""
+
+
+def reachability_boundary(is_reachable, lo: float, hi: float, tol: float = 1e-5) -> float | None:
+    """V25: bisect for the WACC where ``is_reachable`` flips, or None if [lo, hi] does not straddle a flip.
+
+    Assumes one flip in the bracket (reachability is monotone in WACC for
+    each framing on the committed fixtures, checked on a grid in the V25
+    critique). Either side may be the reachable one.
+    """
+    at_lo, at_hi = is_reachable(lo), is_reachable(hi)
+    if at_lo == at_hi:
+        return None
+    while hi - lo > tol:
+        mid = (lo + hi) / 2
+        if is_reachable(mid) == at_lo:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def implied_cost_of_capital_inputs(
+    wacc: float, *, weight_debt: float, cost_of_debt_after_tax: float, risk_free_rate: float, erp: float, beta: float
+) -> dict:
+    """V25: the cost of equity a WACC needs at fixed debt terms, and the beta or ERP alone that would give it."""
+    weight_equity = 1.0 - weight_debt
+    cost_of_equity = (wacc - weight_debt * cost_of_debt_after_tax) / weight_equity
+    return {
+        "cost_of_equity": cost_of_equity,
+        "beta": (cost_of_equity - risk_free_rate) / erp,
+        "erp": (cost_of_equity - risk_free_rate) / beta,
+    }
+
+
+def _reaches(fn, target_price, financials_path, **kwargs):
+    def is_reachable(w: float) -> bool:
+        try:
+            fn(target_price, financials_path, wacc=w, **kwargs)
+            return True
+        except PriceUnreachableError:
+            return False
+
+    return is_reachable
+
+
+def breakeven_wacc_check(target_price: float, financials_path=DEFAULT_FINANCIALS, price_date: str | None = None) -> dict:
+    """V25 (CRITIQUES.md): the WACC at which each framing's reachability flips.
+
+    For the undated 10-year and perpetual solves (unreachable at the base
+    WACC) this is how far WACC must fall to reach the price; for the dated
+    solve (V18) it is how far WACC can rise before it stops reaching it.
+    Each boundary is restated as the cost of equity it needs at the book
+    debt weight and after-tax cost of debt, and as the relevered beta (ERP
+    held) or ERP (beta held) alone that would give it.
+    """
+    base = compute_wacc(financials_path)
+
+    def _framing(is_reachable) -> BreakevenWacc:
+        w = reachability_boundary(is_reachable, *WACC_BRACKET)
+        if w is None:
+            return BreakevenWacc(None, None, None, None)
+        implied = implied_cost_of_capital_inputs(
+            w,
+            weight_debt=base.weight_debt,
+            cost_of_debt_after_tax=base.cost_of_debt_after_tax,
+            risk_free_rate=base.risk_free_rate,
+            erp=base.india_erp,
+            beta=base.relevered_beta,
+        )
+        return BreakevenWacc(w, implied["cost_of_equity"], implied["beta"], implied["erp"])
+
+    result = {
+        "base_wacc": base.wacc,
+        "base_beta": base.relevered_beta,
+        "base_erp": base.india_erp,
+        "10y": _framing(_reaches(implied_growth, target_price, financials_path)),
+        "perpetual": _framing(_reaches(perpetual_breakeven_growth, target_price, financials_path)),
+        "dated": None,
+    }
+    if price_date is not None:
+        base_fiscal_year = str(load_financials(financials_path)["fiscal_year"].iloc[-1])
+        years = years_since_base_year(base_fiscal_year, price_date)
+        result["dated"] = _framing(_reaches(implied_growth, target_price, financials_path, years_elapsed=years))
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ticker", default="GULFOILLUB")
@@ -318,6 +417,29 @@ def main() -> None:
     )
     verdict = "CHANGES the reachability conclusion" if changes else "does not change the reachability conclusion"
     print(f"   -> using market weights {verdict}")
+
+    print("\n6. Breakeven-WACC check (V25: the WACC at which each framing's reachability flips, book weights):")
+    _print_breakeven_wacc(breakeven_wacc_check(price, args.financials, None if market is None else market.date))
+
+
+def _print_breakeven_wacc(r: dict) -> None:
+    print(f"   base case: WACC {r['base_wacc']:.2%}, relevered beta {r['base_beta']:.3f}, ERP {r['base_erp']:.2%}")
+    framings = [("10y undated", r["10y"]), ("perpetual", r["perpetual"])]
+    if r["dated"] is not None:
+        framings.append(("10y dated", r["dated"]))
+    for name, b in framings:
+        if b.wacc is None:
+            lo, hi = WACC_BRACKET
+            print(f"   {name + ':':<13} no flip between WACC {lo:.1%} and {hi:.1%}")
+            continue
+        side = "reachable below" if b.wacc < r["base_wacc"] else "reachable up to"
+        print(
+            f"   {name + ':':<13} {side} WACC {b.wacc:.2%} ({(b.wacc - r['base_wacc']) * 10_000:+.0f} bp); "
+            f"cost of equity {b.cost_of_equity:.2%} = implied beta {b.beta:.3f} at the base ERP, "
+            f"or ERP {b.erp:.2%} at the base beta"
+        )
+    if r["dated"] is None:
+        print("   10y dated:    skipped: --price has no date")
 
 
 def _print_dated_check(price, financials, ticker, price_date) -> None:

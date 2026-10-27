@@ -224,3 +224,56 @@ def test_market_weights_check_lowers_both_ceilings():
     assert r["market"].ceiling_10y < r["book"].ceiling_10y
     assert r["market"].ceiling_perpetual < r["book"].ceiling_perpetual
     assert r["book"].ceiling_10y == pytest.approx(904.98, abs=0.01)
+
+
+def test_reachability_boundary_finds_a_known_breakeven():
+    # V25 (CRITIQUES.md): synthetic known answer -- reachable strictly below
+    # 9.37%, unreachable at or above it.
+    from reverse_dcf.grill import reachability_boundary
+
+    assert reachability_boundary(lambda w: w < 0.0937, 0.071, 0.25) == pytest.approx(0.0937, abs=1e-5)
+
+
+def test_reachability_boundary_returns_none_when_the_bracket_does_not_straddle_it():
+    from reverse_dcf.grill import reachability_boundary
+
+    assert reachability_boundary(lambda w: True, 0.071, 0.25) is None
+    assert reachability_boundary(lambda w: False, 0.071, 0.25) is None
+
+
+def test_implied_beta_and_erp_reproduce_the_wacc():
+    # re* = (w - wd*kd_after)/we; beta* = (re* - rf)/erp; erp* = (re* - rf)/beta.
+    from reverse_dcf.grill import implied_cost_of_capital_inputs
+
+    r = implied_cost_of_capital_inputs(
+        0.10, weight_debt=0.2, cost_of_debt_after_tax=0.06, risk_free_rate=0.07, erp=0.07, beta=0.8
+    )
+    assert r["cost_of_equity"] == pytest.approx(0.11)
+    assert r["beta"] == pytest.approx(4 / 7)
+    assert r["erp"] == pytest.approx(0.05)
+
+
+def test_breakeven_wacc_check_on_the_committed_fixtures():
+    from reverse_dcf.grill import breakeven_wacc_check
+
+    r = breakeven_wacc_check(1054.0, price_date="2026-10-26")
+    base = r["base_wacc"]
+    # The undated framings are unreachable at the base WACC, so their
+    # breakeven sits below it; the dated framing is reachable, so its
+    # breakeven (the WACC above which it stops reaching the price) sits above.
+    assert r["10y"].wacc < base
+    assert r["perpetual"].wacc < r["10y"].wacc
+    assert r["dated"].wacc > base
+    assert 0.0976 < r["10y"].wacc < 0.1001
+
+
+def test_cli_prints_the_breakeven_wacc_check(monkeypatch, capsys):
+    import sys
+
+    from reverse_dcf.grill import main
+
+    monkeypatch.setattr(sys, "argv", ["grill.py"])
+    main()
+    out = capsys.readouterr().out
+    assert "6. Breakeven-WACC check" in out
+    assert "implied beta" in out.split("6. Breakeven-WACC check", 1)[1]

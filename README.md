@@ -203,7 +203,7 @@ the tie-break is the right fallback if a non-monotonic case ever recurs.
 
 ## Findings
 
-**Current result (v3, 26 Oct 2026 fixtures).** At ₹1,054.00 and an 11.76% WACC, no constant growth rate reproduces the price when the value is dated at the FY2023-24 year end (ceilings ₹904.98/share 10-year, ₹708.41/share perpetual). Dated to the price date (V18) the 10-year ceiling is ₹1,110.25/share and the price is reachable at 10.28% implied growth. The Day 3-6 paragraphs further down are the v1 build log: their figures (−0.49% implied CAGR, 3.52% perpetual breakeven, ₹2,294/share at 10% growth, 11.61% WACC) are kept as history and are superseded (V21).
+**Current result (v3, 26 Oct 2026 fixtures).** At ₹1,054.00 and an 11.76% WACC, no constant growth rate reproduces the price when the value is dated at the FY2023-24 year end (ceilings ₹904.98/share 10-year, ₹708.41/share perpetual). Dated to the price date (V18) the 10-year ceiling is ₹1,110.25/share and the price is reachable at 10.28% implied growth. How far the WACC would have to move (V25, `grill` check 6): the undated 10-year solve reaches the price below a 9.94% WACC (−182 bp, a cost of equity of 10.63%, which is a relevered beta of 0.504 at the 7.08% ERP), the undated perpetual one below 7.30% (−446 bp), and the dated 10-year solve stays reachable up to 12.71% (+96 bp). The Day 3-6 paragraphs further down are the v1 build log: their figures (−0.49% implied CAGR, 3.52% perpetual breakeven, ₹2,294/share at 10% growth, 11.61% WACC) are kept as history and are superseded (V21).
 
 Day 8 wrote [`REPORT.md`](REPORT.md), the two-page write-up this whole project exists to
 produce, rendered to `outputs/REPORT.pdf` by a new `scripts/render_report_pdf.py`
@@ -454,6 +454,12 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   `python -m reverse_dcf.wacc --price 1054` prints both blocks and
   `python -m reverse_dcf.grill` check 5 reruns the solves. The base case stays
   at book weights.
+- **The reachability verdict is a WACC-band verdict, not a fact about the price.**
+  `grill` check 6 (V25) bisects for the WACC at which each framing flips: below
+  9.94% the undated 10-year solve reaches ₹1,054.00, and above 12.71% the dated one
+  stops reaching it, so a beta or ERP choice inside that band decides the answer.
+  The boundaries hold the book debt weight and after-tax cost of debt fixed, search
+  only 7.1%-25% WACC, and assume one flip in that range (checked on a grid).
 - **The relevered beta is a Hamada-formula estimate, not a directly measured
   company beta.** It unlevers Damodaran's `Chemical (Basic)` India industry
   average and relevers it to Gulf Oil's own FY2023-24 debt and tax rate. Hamada
