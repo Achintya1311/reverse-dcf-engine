@@ -50,6 +50,12 @@ REQUIRED_COLUMNS = [
 
 LINE_ITEM_COLUMNS = REQUIRED_COLUMNS[1:]
 
+OPTIONAL_COLUMNS = ["other_bank_balances", "current_investments"]
+"""V26 (CRITIQUES.md): treasury held outside cash equivalents (Balance Sheet
+"other bank balances" and current investments). Optional: a blank cell is
+NaN, meaning not yet transcribed, and counts as zero. The committed fixture
+does not carry them yet (S25: the annual-report PDFs are unreachable)."""
+
 
 def load_financials(path: str | Path) -> pd.DataFrame:
     """Load the financials CSV and validate it against the Day 2 schema.
@@ -105,6 +111,12 @@ def to_numeric(df: pd.DataFrame) -> pd.DataFrame:
             out[col] = out[col].astype(float)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"non-numeric values in column '{col}': {exc}") from exc
+    for col in OPTIONAL_COLUMNS:
+        if col in out.columns:
+            try:
+                out[col] = pd.to_numeric(out[col].replace("", None))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"non-numeric values in column '{col}': {exc}") from exc
     return out
 
 

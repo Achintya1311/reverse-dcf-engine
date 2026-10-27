@@ -46,7 +46,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from reverse_dcf.financials import load_financials, to_numeric
+from reverse_dcf.financials import OPTIONAL_COLUMNS, load_financials, to_numeric
 from reverse_dcf.wacc import DEFAULT_FINANCIALS, compute_wacc, effective_tax_rate, load_risk_free_rate
 
 LAKH_TO_RUPEES = 100_000
@@ -165,6 +165,16 @@ def is_working_capital_release_year(df_row: "pd.Series", prior_row: "pd.Series")
     return df_row["net_working_capital"] < prior_row["net_working_capital"]
 
 
+def non_operating_liquid_assets(df_row: "pd.Series") -> float:
+    """V26: treasury outside cash equivalents (``financials.OPTIONAL_COLUMNS``), zero where absent or blank."""
+    total = 0.0
+    for col in OPTIONAL_COLUMNS:
+        value = df_row.get(col)
+        if value is not None and not math.isnan(float(value)):
+            total += float(value)
+    return total
+
+
 def invested_capital(df_row: "pd.Series") -> float:
     """Approximate invested capital for one fiscal year: ``total_assets - cash_and_equivalents``.
 
@@ -179,7 +189,8 @@ def invested_capital(df_row: "pd.Series") -> float:
     reinvestment rate is economically plausible, not for a standalone ROIC
     headline.
     """
-    return df_row["total_assets"] - df_row["cash_and_equivalents"]
+    # V26: treasury outside cash equivalents is not capital employed either.
+    return df_row["total_assets"] - df_row["cash_and_equivalents"] - non_operating_liquid_assets(df_row)
 
 
 def historical_roic(df_row: "pd.Series", prior_row: "pd.Series", tax_rate: float) -> float:
@@ -635,7 +646,7 @@ def base_case_from_financials(
     # instead.
     terminal_reinvestment_rate = terminal_growth / terminal_roic_value
 
-    net_debt_lakh = current["total_debt"] - current["cash_and_equivalents"]
+    net_debt_lakh = current["total_debt"] - current["cash_and_equivalents"] - non_operating_liquid_assets(current)
     return DcfAssumptions(
         revenue_base=current["revenue"] * LAKH_TO_RUPEES,
         revenue_growth=revenue_growth,

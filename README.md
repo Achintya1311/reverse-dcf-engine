@@ -460,6 +460,17 @@ equity, **WACC = 11.61%**. Full sourcing and methodology in
   stops reaching it, so a beta or ERP choice inside that band decides the answer.
   The boundaries hold the book debt weight and after-tax cost of debt fixed, search
   only 7.1%-25% WACC, and assume one flip in that range (checked on a grid).
+- **Treasury held outside cash equivalents is valued at zero (V26).**
+  `cash_and_equivalents` is the cash-flow statement's narrow line, so Ind AS
+  "Other bank balances" (term deposits) and any current investments never reduce
+  net debt, and they stay inside `invested_capital`, which lowers historical ROIC
+  and the fade schedule. Both effects push the ceilings down, the same direction
+  as the headline. Closing the 10-year gap would take about ₹149/share of extra net
+  cash (₹1,054.00 − ₹904.98, ≈ ₹733 cr at 49,168,433 shares). Optional
+  `other_bank_balances` and `current_investments` columns (₹ lakh) now feed net
+  debt and invested capital when present; the committed fixture does not carry
+  them yet, because the annual-report PDFs are unreachable from the build
+  sandbox (S25), so the size of the omission is unmeasured.
 - **The relevered beta is a Hamada-formula estimate, not a directly measured
   company beta.** It unlevers Damodaran's `Chemical (Basic)` India industry
   average and relevers it to Gulf Oil's own FY2023-24 debt and tax rate. Hamada
