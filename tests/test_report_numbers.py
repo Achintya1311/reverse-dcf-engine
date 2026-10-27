@@ -47,3 +47,20 @@ def test_readme_quotes_the_committed_price_and_its_date():
     lead = next(line for line in text.splitlines() if line.startswith("**Finding"))
     assert f"₹{market.price:,.2f} price of {market.date}" in lead
     assert f"on {market.date} (₹{market.price:,.2f}/share)" in text
+
+
+def test_report_quotes_the_dated_result_beside_the_undated_one():
+    # P99: since V18 the CLI and README report the solve dated to the price
+    # date, where the price is reachable; REPORT.md quoted only the undated one.
+    text = REPORT.read_text()
+    market = load_market_price("GULFOILLUB", MARKET_FIXTURES)
+    result = solve(market.price, DEFAULT_FINANCIALS, ticker="GULFOILLUB", price_date=market.date)
+    contract = result.to_contract()["valuation"]
+    assert contract["price_reachable_dated"]
+    row = (
+        f"| 10-year implied CAGR, dated to {market.date} (V18) | **{contract['implied_cagr_dated']:.2%}** "
+        f"| ₹{contract['max_achievable_price_10y_dated']:,.2f}/share "
+        f"| +{contract['growth_at_max_achievable_price_10y_dated']:.2%} |"
+    )
+    assert row in text
+    assert "valued at the FY2023-24 year end" in text

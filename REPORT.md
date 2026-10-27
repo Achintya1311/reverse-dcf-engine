@@ -12,6 +12,8 @@ reinvestment rule. The model's own ceiling is ₹904.98/share on the 10-year fra
 +11.76% growth) and ₹708.41/share on the perpetual framing (also +11.76% growth) — today's price
 sits ₹149.02 and ₹345.59 above each, respectively.**
 
+*Scope (P99): that result holds when the company is valued at the FY2023-24 year end, which is how the undated solve discounts. Dated to the price date (V18, row three of the table below), the same model reproduces the price at 10.28% a year, so whether a constant growth rate reproduces the price depends on that timing convention.*
+
 That is a sharper version of this project's own contract-spec placeholder ("expectations exceed
 history"): the price doesn't just sit above a growth rate this model finds unlikely, it sits
 above the highest price this model can produce at all, anywhere in its feasible growth range,
@@ -30,10 +32,11 @@ explicit-period revenue growth rate that reproduces ₹1,054.00/share — and ra
 |---|---|---|---|
 | 10-year implied CAGR | **Unreachable** | **₹904.98/share** | +11.76% |
 | Perpetual breakeven | **Unreachable** | **₹708.41/share** | +11.76% |
+| 10-year implied CAGR, dated to 2026-10-26 (V18) | **10.28%** | ₹1,110.25/share | +11.76% |
 
 Both ceilings come straight from `solve()`'s own `max_achievable_price_10y`/`max_achievable_price_perpetual`
 fields, not hand-derived: each is the highest price the forward DCF can produce anywhere in the
-solver's feasible growth bracket, holding every other assumption at base case. Neither ceiling
+solver's feasible growth bracket, holding every other assumption at base case. The dated row carries the FY2023-24 year-end value 2.57 years forward to 2026-10-26 at WACC, less the elapsed years' modelled FCFF (`forward.roll_forward_share_price`); those years come from the model's own forecast, not reported actuals, so it is reported beside the undated rows, not instead of them. Neither ceiling
 moved when the committed price fixture refreshed from ₹1,061.00 (2026-09-12) to ₹1,066.00
 (2026-10-19), ₹1,039.00 (2026-10-25) and ₹1,054.00 (2026-10-26) — the ceilings depend on margin, ROIC and WACC,
 not on the target price itself. They did move when the WACC inputs refreshed on 2026-10-25
