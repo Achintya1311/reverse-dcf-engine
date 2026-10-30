@@ -1,5 +1,7 @@
 # Day 1 — shortlist
 
+Educational research on historical data. Not investment advice. Not a SEBI-registered research analyst.
+
 **Screen:** NSE mid-cap, ₹5,000–50,000 cr market cap, thin analyst coverage, a business
 explainable end to end in a paragraph, ten years of annual reports available.
 

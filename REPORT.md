@@ -1,5 +1,7 @@
 # Gulf Oil Lubricants India (NSE: GULFOILLUB) — what the price would require
 
+Educational research on historical data. Not investment advice. Not a SEBI-registered research analyst.
+
 *Reverse DCF, ₹1,054.00/share (screener.in, 2026-10-26). All figures reproducible with
 `python -m reverse_dcf.solve`, `python -m reverse_dcf.compare`, `python -m reverse_dcf.sensitivity`,
 `python -m reverse_dcf.grill`.*
