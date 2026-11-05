@@ -74,6 +74,7 @@ def test_horizon_sensitivity_decreases_with_longer_horizons():
     assert values == sorted(values, reverse=True)
 
 
+@pytest.mark.docs_pin
 def test_horizon_sensitivity_reports_unreachable_horizons_with_their_ceiling():
     # V6 (CRITIQUES.md, Day 18): fixing the terminal-value bug lowers every
     # horizon's price ceiling (the old formula's "free" terminal growth no
@@ -204,6 +205,7 @@ def test_cli_skips_the_valuation_date_check_for_an_undated_price(monkeypatch, ca
     assert "skipped: --price has no date" in capsys.readouterr().out
 
 
+@pytest.mark.docs_pin
 def test_cli_prints_the_market_weights_check(monkeypatch, capsys):
     import sys
 

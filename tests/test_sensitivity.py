@@ -74,6 +74,7 @@ def test_sensitivity_rows_are_centered_on_the_actual_base_case():
         assert r.low_value < r.base_value < r.high_value
 
 
+@pytest.mark.docs_pin
 def test_sensitivity_table_reports_the_real_market_price_as_mostly_unreachable():
     # The actual Day 4 finding carried through to the tornado: shocking
     # WACC, terminal growth or EBIT margin by a small amount around an
@@ -156,6 +157,7 @@ def test_higher_wacc_requires_higher_implied_growth():
     assert wacc_row.high_growth > wacc_row.low_growth
 
 
+@pytest.mark.docs_pin
 def test_roic_spread_pins_the_readme_worked_numbers():
     # CRITIQUES.md V13: README.md's "Limitations" section hand-probes
     # roic_spread at the real market price and quotes two of its values by
