@@ -7,8 +7,12 @@ brought up to date.
 
 from pathlib import Path
 
+import pytest
+
 from reverse_dcf.solve import DEFAULT_FINANCIALS, MARKET_FIXTURES, load_market_price, solve
 from reverse_dcf.wacc import compute_wacc
+
+pytestmark = pytest.mark.docs_pin
 
 REPORT = Path(__file__).resolve().parents[1] / "REPORT.md"
 

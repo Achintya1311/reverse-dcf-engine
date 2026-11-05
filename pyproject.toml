@@ -22,3 +22,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["reverse_dcf*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "docs_pin: pins hand-written README.md/REPORT.md text or a dated conclusion to the committed fixtures; the refresh workflows hold back a fixture that would break these instead of pushing it",
+]

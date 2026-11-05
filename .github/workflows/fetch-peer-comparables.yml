@@ -48,7 +48,41 @@ jobs:
           python scripts/fetch_peer_comparables.py --ticker GANDHAR --name "Gandhar Oil Refinery" --statement consolidated
         continue-on-error: true
 
-      - name: Commit if any peer's figures changed
+      - name: Install the package for the tests
+        run: pip install -e ".[dev]"
+
+      - name: Tests on the refreshed fixtures (D47)
+        # A push made with GITHUB_TOKEN does not start ci.yml, so this is the
+        # only run that sees the new fixtures. Everything except the docs_pin
+        # tests must pass: a red run here means the fetched data or the code
+        # is broken, and nothing is pushed.
+        run: pytest -q -m "not docs_pin"
+
+      - name: Do README.md and REPORT.md still match the fixtures?
+        # docs_pin tests pin hand-written README/REPORT numbers to the
+        # committed fixtures. Until 5 Nov 2026 this workflow pushed first and
+        # tested after, so every price move left main red until someone
+        # rewrote the docs (2-4 Nov 2026 runs). Now a fixture that would
+        # outdate the docs is held back: the run stays green, says so in a
+        # warning and the job summary, and main keeps docs and fixtures in
+        # step. Regenerate the docs together with the fixture to land it.
+        id: docs
+        run: |
+          if pytest -q -m docs_pin; then
+            echo "match=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "match=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::the new peer figures would outdate README.md/REPORT.md (docs_pin tests); not committed. Regenerate the docs with the fixture to land it."
+            {
+              echo "### Fixture refresh held back"
+              echo ""
+              echo "The new peer figures would make the hand-written numbers in README.md/REPORT.md stale (\`pytest -m docs_pin\` fails), so nothing was pushed. Fetch locally, update the docs, and commit both together."
+              git diff -- fixtures/peers
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commit if the fixtures changed and the docs still match
+        if: steps.docs.outputs.match == 'true'
         run: |
           git config user.name "Achintya1311"
           git config user.email "67464985+Achintya1311@users.noreply.github.com"
@@ -60,12 +94,3 @@ jobs:
           git commit -m "data: refresh peer comparables fixture ($(date -u +%Y-%m-%d))"
           git pull --rebase origin main
           git push
-
-      - name: Tests on the refreshed fixtures (D47)
-        # A push made with GITHUB_TOKEN does not start ci.yml, so this is the
-        # only run that sees the new fixtures. A refresh that outdates
-        # REPORT.md or the README (tests/test_report_numbers.py) turns this
-        # run red instead of leaving main silently failing.
-        run: |
-          pip install -e ".[dev]"
-          pytest -q

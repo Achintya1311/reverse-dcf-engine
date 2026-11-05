@@ -575,6 +575,7 @@ def test_readme_limitations_agree_with_the_perpetual_vs_ten_year_test():
 # -- Day 152 (V21): the Findings section leads with the live numbers --
 
 
+@pytest.mark.docs_pin
 def test_readme_findings_open_with_the_live_ceiling_and_label_the_v1_log():
     readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
     findings = readme.split("## Findings\n", 1)[1]

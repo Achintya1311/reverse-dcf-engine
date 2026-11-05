@@ -180,6 +180,7 @@ def test_cli_runs_end_to_end_against_the_committed_fixtures(monkeypatch, capsys)
     assert "ROIC-anchor" in out
 
 
+@pytest.mark.docs_pin
 def test_cli_prints_the_valuation_date_check(monkeypatch, capsys):
     import sys
 
@@ -189,7 +190,7 @@ def test_cli_prints_the_valuation_date_check(monkeypatch, capsys):
     main()
     out = capsys.readouterr().out
     assert "4. Valuation-date check" in out
-    assert "dated to 2026-10-26" in out
+    assert f"dated to {load_market_price().date}" in out
     assert "CHANGES the reachability conclusion" in out.split("4. Valuation-date check")[1]
 
 
