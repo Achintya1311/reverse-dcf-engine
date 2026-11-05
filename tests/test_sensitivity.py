@@ -243,3 +243,19 @@ def test_cli_accepts_an_explicit_price_override(monkeypatch, capsys, tmp_path):
     out = capsys.readouterr().out
     assert "Rs1,500.00" in out
     assert output.exists()
+
+
+def test_cli_prints_unreachable_not_nan(monkeypatch, capsys, tmp_path):
+    # P168: at the committed price most shocks make the price unreachable;
+    # the table printed "+nan%" / "swing nan%" where the chart says
+    # "unreachable".
+    import sys
+
+    from reverse_dcf.sensitivity import main
+
+    monkeypatch.setattr(sys, "argv", ["sensitivity.py", "--price", "1054", "--output", str(tmp_path / "t.png")])
+    main()
+    out = capsys.readouterr().out
+    assert "nan" not in out.lower()
+    wacc = next(line for line in out.splitlines() if line.strip().startswith("WACC"))
+    assert "unreachable" in wacc

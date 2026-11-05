@@ -284,6 +284,16 @@ def plot_tornado(rows: list[SensitivityRow], ticker: str, target_price: float, o
     return output_path
 
 
+def _growth_cell(growth: float) -> str:
+    """A shocked implied growth, or "unreachable" where no growth rate
+    reproduces the price (NaN), the word the tornado chart uses (P168)."""
+    return f"{'unreachable':>11}" if pd.isna(growth) else f"{growth:>+11.2%}"
+
+
+def _swing_cell(swing: float) -> str:
+    return "n/a (an end is unreachable)" if pd.isna(swing) else f"{swing:>6.2%}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ticker", default="GULFOILLUB")
@@ -304,9 +314,9 @@ def main() -> None:
     for r in rows:
         print(
             f"  {r.label:<21} base {r.base_value:>7.2%}  |  "
-            f"{r.low_value:>7.2%} -> {r.low_growth:>+7.2%}   "
-            f"{r.high_value:>7.2%} -> {r.high_growth:>+7.2%}   "
-            f"swing {r.swing:>6.2%}"
+            f"{r.low_value:>7.2%} -> {_growth_cell(r.low_growth)}   "
+            f"{r.high_value:>7.2%} -> {_growth_cell(r.high_growth)}   "
+            f"swing {_swing_cell(r.swing)}"
         )
 
     path = plot_tornado(rows, args.ticker, price, args.output)
